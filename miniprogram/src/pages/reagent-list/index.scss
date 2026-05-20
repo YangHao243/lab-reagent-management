@@ -1,0 +1,82 @@
+.reagent-list-page {
+  .search-panel {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .search-input {
+    box-sizing: border-box;
+    flex: 1;
+    min-height: 78px;
+    padding: 0 18px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .search-button {
+    width: 130px;
+    height: 78px;
+    margin: 0;
+    border-radius: 10px;
+    background: #0f766e;
+    color: #ffffff;
+    line-height: 78px;
+  }
+
+  .reagent-card {
+    box-sizing: border-box;
+    margin-bottom: 18px;
+    padding: 24px;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+  }
+
+  .reagent-card.low-stock {
+    border-color: #fecaca;
+    background: #fff7f7;
+  }
+
+  .reagent-card.low-stock .reagent-line {
+    color: #7f1d1d;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .reagent-name {
+    color: #111827;
+    font-size: 32px;
+    font-weight: 700;
+  }
+
+  .low-stock-tag {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: #fee2e2;
+    color: #dc2626;
+    font-size: 22px;
+  }
+
+  .reagent-subtitle {
+    display: block;
+    margin-bottom: 12px;
+    color: #6b7280;
+    font-size: 24px;
+  }
+
+  .reagent-line {
+    display: block;
+    margin-top: 6px;
+    color: #374151;
+    font-size: 25px;
+    line-height: 1.5;
+  }
+}

@@ -1,0 +1,81 @@
+page {
+  min-height: 100%;
+  background: #f5f7fb;
+  color: #1f2937;
+  font-size: 28px;
+}
+
+.page {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.page-title {
+  display: block;
+  margin-bottom: 10px;
+  color: #111827;
+  font-size: 40px;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  display: block;
+  margin-bottom: 24px;
+  color: #6b7280;
+  font-size: 26px;
+  line-height: 1.6;
+}
+
+.panel {
+  box-sizing: border-box;
+  margin-bottom: 20px;
+  padding: 24px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.panel-title {
+  display: block;
+  margin-bottom: 12px;
+  color: #111827;
+  font-size: 30px;
+  font-weight: 600;
+}
+
+.muted-text {
+  color: #6b7280;
+  font-size: 24px;
+}
+
+.primary-button {
+  margin: 0 0 16px;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.danger-button {
+  margin: 0 0 16px;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.form-label {
+  display: block;
+  margin: 18px 0 8px;
+  color: #374151;
+  font-size: 26px;
+}
+
+.form-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 78px;
+  padding: 0 18px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+}

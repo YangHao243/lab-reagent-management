@@ -1,0 +1,54 @@
+.inventory-in-page {
+  .stock-card {
+    border-left: 8px solid #0f766e;
+  }
+
+  .stock-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .stock-item {
+    box-sizing: border-box;
+    min-height: 118px;
+    padding: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #f8fafc;
+  }
+
+  .stock-label {
+    display: block;
+    margin-bottom: 8px;
+    color: #6b7280;
+    font-size: 24px;
+  }
+
+  .stock-value {
+    display: block;
+    color: #111827;
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+
+  .stock-value.warning {
+    color: #dc2626;
+  }
+
+  .empty-panel {
+    padding-bottom: 10px;
+  }
+
+  .choose-button {
+    margin-top: 22px;
+  }
+
+  .form-textarea {
+    min-height: 160px;
+    padding-top: 18px;
+    line-height: 1.5;
+  }
+}

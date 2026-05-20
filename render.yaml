@@ -1,0 +1,33 @@
+# Render Blueprint 配置文件
+# 使用方式：在 Render Dashboard → Blueprints → 连接此仓库
+# 或手动创建 Web Service 时参考此文件中的配置。
+
+services:
+  - type: web
+    name: lab-reagent-backend
+    runtime: python
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "480"
+      - key: CORS_ORIGINS
+        value: "https://your-frontend.pages.dev"
+      - key: DEBUG
+        value: "false"
+      - key: ALLOW_DEFAULT_SUPERADMIN
+        value: "false"
+      - key: FRONTEND_URL
+        value: "https://your-frontend.pages.dev"
+      - key: PYTHON_VERSION
+        value: "3.10.16"

@@ -1,0 +1,80 @@
+# ============================================================
+# 实验室化学试剂仓库管理系统 — Git 忽略规则
+# ============================================================
+
+# --- 环境变量（包含密钥和数据库密码）---
+.env
+.env.*
+!.env.example
+
+# --- SQLite 本地数据库 ---
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-journal.*
+*.db.backup-*
+*.db.test-backup-*
+*.db.broken-*
+*.backup*
+*.bak
+
+# --- 数据导出与备份 ---
+exports/
+backend/exports/
+*_backup/
+versions_backup/
+*.export.json
+sqlite_export_*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# --- pytest ---
+.pytest_cache/
+pytest-cache-files-*/
+
+# --- 日志与临时文件 ---
+*.log
+uvicorn-*.log
+uvicorn-*.err.log
+uvicorn-*.out.log
+*.tmp
+write_test.tmp
+
+# --- 前端 ---
+node_modules/
+admin-web/dist/
+admin-web/node_modules/
+
+# --- 私有本地配置 ---
+*.private.config.json
+project.private.config.json
+
+# --- Claude Code ---
+.claude/
+
+# --- IDE ---
+.vscode/
+.idea/
+
+# --- macOS / Windows ---
+.DS_Store
+Thumbs.db
+
+# --- 小程序构建产物 ---
+miniprogram/dist/
+miniprogram/node_modules/
+
+# --- 小程序缓存 / 编译缓存 ---
+.swc/
+miniprogram/.swc/
+
+# --- 本地环境检查报告 ---
+environment_check_report.txt

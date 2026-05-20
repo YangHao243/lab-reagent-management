@@ -1,0 +1,175 @@
+.index-page {
+  padding-bottom: 40px;
+
+  .hero {
+    margin-bottom: 22px;
+    padding: 30px 28px;
+    border-radius: 16px;
+    background: #0f766e;
+    color: #ffffff;
+  }
+
+  .hero-title {
+    display: block;
+    margin-bottom: 10px;
+    color: #ffffff;
+    font-size: 40px;
+    font-weight: 700;
+  }
+
+  .hero-subtitle {
+    display: block;
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 25px;
+    line-height: 1.5;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    margin-bottom: 22px;
+  }
+
+  .summary-card {
+    box-sizing: border-box;
+    min-height: 150px;
+    padding: 22px;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+  }
+
+  .summary-card.warning {
+    border-color: #fecaca;
+    background: #fff7f7;
+  }
+
+  .summary-value {
+    display: block;
+    margin-bottom: 8px;
+    color: #111827;
+    font-size: 42px;
+    font-weight: 700;
+  }
+
+  .warning .summary-value {
+    color: #dc2626;
+  }
+
+  .summary-label {
+    display: block;
+    color: #6b7280;
+    font-size: 24px;
+  }
+
+  .action-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+
+  .action-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 76px;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid #d1fae5;
+    border-radius: 12px;
+    background: #ecfdf5;
+    color: #0f766e;
+    font-size: 24px;
+    line-height: 1.2;
+  }
+
+  .section-card {
+    box-sizing: border-box;
+    padding: 24px;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .section-title {
+    color: #111827;
+    font-size: 30px;
+    font-weight: 700;
+  }
+
+  .refresh-button {
+    margin: 0;
+    border-radius: 8px;
+    background: #f3f4f6;
+    color: #374151;
+    font-size: 22px;
+  }
+
+  .reagent-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    border-bottom: 1px solid #f3f4f6;
+  }
+
+  .reagent-row:last-child {
+    border-bottom: 0;
+  }
+
+  .reagent-name {
+    display: block;
+    margin-bottom: 6px;
+    color: #111827;
+    font-size: 28px;
+    font-weight: 600;
+  }
+
+  .reagent-meta {
+    display: block;
+    max-width: 420px;
+    color: #6b7280;
+    font-size: 23px;
+    line-height: 1.4;
+  }
+
+  .stock-box {
+    min-width: 150px;
+    text-align: right;
+  }
+
+  .stock-value {
+    display: block;
+    color: #dc2626;
+    font-size: 27px;
+    font-weight: 700;
+  }
+
+  .stock-threshold {
+    display: block;
+    margin-top: 4px;
+    color: #9ca3af;
+    font-size: 21px;
+  }
+
+  .empty-text,
+  .error-text {
+    display: block;
+    padding: 20px 0 6px;
+    color: #6b7280;
+    font-size: 24px;
+  }
+
+  .error-text {
+    color: #dc2626;
+  }
+}

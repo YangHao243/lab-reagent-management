@@ -1,0 +1,40 @@
+{
+  "appid": "wx4264a4620d5e19e7",
+  "compileType": "miniprogram",
+  "description": "实验室化学试剂仓库管理系统微信小程序",
+  "miniprogramRoot": "dist/",
+  "projectname": "lab-reagent-miniprogram",
+  "setting": {
+    "compileHotReLoad": false,
+    "enhance": true,
+    "es6": true,
+    "postcss": true,
+    "preloadBackgroundData": false,
+    "urlCheck": false,
+    "compileWorklet": false,
+    "minified": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "swc": false,
+    "disableSWC": true,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "simulatorPluginLibVersion": {},
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "editorSetting": {}
+}
