@@ -36,6 +36,7 @@ OPERATION_LABELS = {
     "in": "入库",
     "out": "领取",
 }
+EXCEL_IMPORT_TIME = time(hour=10)
 
 
 INVENTORY_RECORD_COLUMN_MIGRATIONS = {
@@ -237,7 +238,7 @@ def parse_row_date(sheet_name: str, row_number: int, row_date_cell: Any) -> date
     year, month = period
     _ = row_number
     if is_blank(row_date_cell):
-        raise ValueError("A列日期不能为空")
+        raise ValueError("日期为空，已跳过")
 
     value = row_date_cell
     parsed_date: date | None = None
@@ -273,6 +274,13 @@ def parse_row_date(sheet_name: str, row_number: int, row_date_cell: Any) -> date
             f"A列日期 {parsed_date.isoformat()} 与 sheet 年月 {year}-{month:02d} 不一致"
         )
     return parsed_date
+
+
+def parse_excel_row_date(sheet_name: str, row_number: int, row_date_cell: Any) -> datetime:
+    """解析 Excel A 列日期，并统一补齐为当天 10:00:00。"""
+
+    parsed_date = parse_row_date(sheet_name, row_number, row_date_cell)
+    return datetime.combine(parsed_date, EXCEL_IMPORT_TIME)
 
 
 def parse_day(value: Any, fallback_day: int, year: int, month: int) -> int:
@@ -388,7 +396,7 @@ def build_source_hash(
     operation_type: str,
     quantity: float,
     operator_name: str,
-    event_date: date,
+    event_date: date | datetime,
 ) -> str:
     """生成用于幂等导入的来源哈希。"""
 
@@ -470,7 +478,12 @@ def import_excel_inventory(
         for row_index in range(3, min(len(dataframe.index), 34)):
             excel_row = row_index + 1
             try:
-                event_date = parse_row_date(sheet_name, excel_row, dataframe.iat[row_index, 0])
+                operation_time = parse_excel_row_date(
+                    sheet_name,
+                    excel_row,
+                    dataframe.iat[row_index, 0],
+                )
+                event_date = operation_time.date()
             except ValueError as exc:
                 if row_has_operation(dataframe, row_index, groups):
                     affected_reagents: list[str] = []
@@ -502,9 +515,9 @@ def import_excel_inventory(
 
                 operation_text = clean_text(dataframe.iat[row_index, column_index])
                 quantity_cell = dataframe.iat[row_index, column_index + 1]
-                operator_name = clean_text(dataframe.iat[row_index, column_index + 2])
+                operator_cell_text = clean_text(dataframe.iat[row_index, column_index + 2])
 
-                if not operation_text and is_blank(quantity_cell) and not operator_name:
+                if not operation_text and is_blank(quantity_cell) and not operator_cell_text:
                     continue
 
                 if operation_text not in OPERATION_MAPPING:
@@ -522,10 +535,7 @@ def import_excel_inventory(
                     parse_result.add_error(sheet_name, excel_row, reagent_name, str(exc))
                     continue
 
-                if not operator_name:
-                    parse_result.add_error(sheet_name, excel_row, reagent_name, "操作人不能为空")
-                    continue
-
+                operator_name = operator_cell_text or "-"
                 operation_type = OPERATION_MAPPING[operation_text]
                 source_hash = build_source_hash(
                     sheet_name=sheet_name,
@@ -535,7 +545,7 @@ def import_excel_inventory(
                     operation_type=operation_type,
                     quantity=quantity,
                     operator_name=operator_name,
-                    event_date=event_date,
+                    event_date=operation_time,
                 )
 
                 if source_hash in seen_hashes:
@@ -558,6 +568,7 @@ def import_excel_inventory(
                         source_row=excel_row,
                         source_col=column_index + 1,
                         source_hash=source_hash,
+                        operation_time=operation_time,
                     )
                 )
                 seen_hashes.add(source_hash)

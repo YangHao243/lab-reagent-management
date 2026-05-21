@@ -135,6 +135,12 @@ function getCalendarCells(year: number, month: number) {
   ];
 }
 
+function getQuantityColor(value: number) {
+  if (value > 0) return "#389e0d";
+  if (value < 0) return "#cf1322";
+  return undefined;
+}
+
 export default function InventoryRecords() {
   const [form] = Form.useForm<InventoryOperationValues>();
   const watchedReason = Form.useWatch("reason", form);
@@ -332,7 +338,7 @@ export default function InventoryRecords() {
       dataIndex: "quantity_change",
       width: 110,
       render: (value: number, record) => (
-        <span style={{ color: record.operation_type === "out" ? "#cf1322" : "#389e0d" }}>
+        <span style={{ color: getQuantityColor(value) }}>
           {value}
         </span>
       ),
@@ -399,7 +405,7 @@ export default function InventoryRecords() {
       dataIndex: "quantity_change",
       width: 100,
       render: (value: number, record) => (
-        <span style={{ color: record.operation_type === "out" ? "#cf1322" : "#389e0d" }}>
+        <span style={{ color: getQuantityColor(value) }}>
           {value}
         </span>
       ),

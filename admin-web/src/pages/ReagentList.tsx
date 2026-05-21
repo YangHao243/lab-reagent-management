@@ -34,6 +34,8 @@ type Reagent = {
   expiry_date?: string | null;
   msds_url?: string | null;
   remark?: string | null;
+  adjustment_record_created?: boolean;
+  adjustment_record_id?: number | null;
 };
 
 type ReagentFormValues = {
@@ -156,12 +158,16 @@ export default function ReagentList() {
     form.validateFields().then((values) => {
       const payload = normalizeFormValues(values);
       const request = editingReagent
-        ? apiClient.put(`/reagents/${editingReagent.id}`, payload)
-        : apiClient.post("/reagents/", payload);
+        ? apiClient.put<Reagent>(`/reagents/${editingReagent.id}`, payload)
+        : apiClient.post<Reagent>("/reagents/", payload);
 
       request
-        .then(() => {
-          message.success(editingReagent ? "试剂已更新" : "试剂已新增");
+        .then((response) => {
+          if (editingReagent && response.data.adjustment_record_created) {
+            message.success("试剂信息已更新，库存校正记录已生成");
+          } else {
+            message.success(editingReagent ? "试剂已更新" : "试剂已新增");
+          }
           setModalOpen(false);
           setEditingReagent(null);
           form.resetFields();
@@ -327,7 +333,7 @@ export default function ReagentList() {
             </Space>
             <Space style={{ width: "100%" }} align="start">
               <Form.Item name="current_quantity" label="当前库存" style={{ width: 320 }}>
-                <InputNumber min={0} style={{ width: "100%" }} />
+                <InputNumber style={{ width: "100%" }} />
               </Form.Item>
               <Form.Item name="warning_threshold" label="预警阈值" style={{ width: 320 }}>
                 <InputNumber min={0} style={{ width: "100%" }} />

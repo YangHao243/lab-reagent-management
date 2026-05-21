@@ -84,6 +84,50 @@ def create_test_reagent(client: TestClient, headers: dict[str, str], name: str) 
     return response.json()["id"]
 
 
+def create_test_reagent_with_stock(
+    client: TestClient,
+    headers: dict[str, str],
+    name: str,
+    current_quantity: float,
+) -> int:
+    """创建一个指定初始库存的测试试剂，不自动生成库存流水。"""
+
+    response = client.post(
+        "/reagents/",
+        json={
+            "name_cn": name,
+            "name_en": name,
+            "cas_no": f"TEST-{name}",
+            "category": "测试分类",
+            "specification": "测试规格",
+            "unit": "瓶",
+            "current_quantity": current_quantity,
+            "warning_threshold": 1,
+            "location": "测试位置",
+            "hazard_level": "测试",
+            "remark": "库存校正测试",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def get_inventory_records_for_reagent(reagent_id: int) -> list[InventoryRecord]:
+    """直接读取某个试剂的库存流水。"""
+
+    db = SessionLocal()
+    try:
+        return list(
+            db.query(InventoryRecord)
+            .filter(InventoryRecord.reagent_id == reagent_id)
+            .order_by(InventoryRecord.id.asc())
+            .all()
+        )
+    finally:
+        db.close()
+
+
 def stock_in(
     client: TestClient,
     headers: dict[str, str],
@@ -255,6 +299,129 @@ def test_auth_required_and_role_forbidden(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {member_token}"},
     )
     assert forbidden_response.status_code == 403
+
+
+def test_update_reagent_without_stock_change_does_not_create_adjustment_record(
+    client: TestClient,
+) -> None:
+    """只修改分类/单位等非库存字段时，不应生成库存校正流水。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent_with_stock(client, headers, "非库存字段更新", 10)
+
+    response = client.put(
+        f"/reagents/{reagent_id}",
+        json={"category": "新分类", "unit": "盒"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["category"] == "新分类"
+    assert data["unit"] == "盒"
+    assert data["current_quantity"] == 10
+    assert data["adjustment_record_created"] is False
+    assert get_inventory_records_for_reagent(reagent_id) == []
+
+
+def test_update_reagent_stock_creates_positive_adjustment_record(
+    client: TestClient,
+) -> None:
+    """库存从 3 改为 10 时，应生成 +7 的库存校正流水。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent_with_stock(client, headers, "库存上调校正", 3)
+
+    response = client.put(
+        f"/reagents/{reagent_id}",
+        json={"current_quantity": 10},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["current_quantity"] == 10
+    assert data["adjustment_record_created"] is True
+
+    records = get_inventory_records_for_reagent(reagent_id)
+    assert len(records) == 1
+    record = records[0]
+    assert record.operation_type == "adjust"
+    assert record.quantity_change == 7
+    assert record.before_quantity == 3
+    assert record.after_quantity == 10
+    assert record.reason == "库存校正"
+    assert "3 → 10" in (record.remark or "")
+    assert record.operator_name == "superadmin"
+
+
+def test_update_reagent_stock_creates_negative_adjustment_record(
+    client: TestClient,
+) -> None:
+    """库存从 10 改为 4 时，应生成 -6 的库存校正流水。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent_with_stock(client, headers, "库存下调校正", 10)
+
+    response = client.put(
+        f"/reagents/{reagent_id}",
+        json={"current_quantity": 4},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    records = get_inventory_records_for_reagent(reagent_id)
+    assert len(records) == 1
+    assert records[0].operation_type == "adjust"
+    assert records[0].quantity_change == -6
+    assert records[0].before_quantity == 10
+    assert records[0].after_quantity == 4
+
+
+def test_update_reagent_stock_same_value_does_not_create_adjustment_record(
+    client: TestClient,
+) -> None:
+    """库存值未变化时，不应生成校正流水。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent_with_stock(client, headers, "库存不变校正", 5)
+
+    response = client.put(
+        f"/reagents/{reagent_id}",
+        json={"current_quantity": 5},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["adjustment_record_created"] is False
+    assert get_inventory_records_for_reagent(reagent_id) == []
+
+
+def test_update_reagent_stock_allows_negative_adjustment(
+    client: TestClient,
+) -> None:
+    """库存从 2 改为 -3 时允许保存，并生成 -5 的校正流水。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent_with_stock(client, headers, "库存校正为负数", 2)
+
+    response = client.put(
+        f"/reagents/{reagent_id}",
+        json={"current_quantity": -3},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["current_quantity"] == -3
+    assert response.json()["adjustment_record_created"] is True
+    assert get_stock(client, headers, reagent_id) == -3
+
+    records = get_inventory_records_for_reagent(reagent_id)
+    assert len(records) == 1
+    assert records[0].operation_type == "adjust"
+    assert records[0].quantity_change == -5
+    assert records[0].before_quantity == 2
+    assert records[0].after_quantity == -3
 
 
 def test_delete_out_record_restores_stock(client: TestClient) -> None:

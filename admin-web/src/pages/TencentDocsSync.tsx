@@ -80,6 +80,11 @@ type FileImportResult = {
   updated_reagents?: number;
 };
 
+function shouldShowImportError(error: ImportErrorItem) {
+  const reason = error.reason || "";
+  return !reason.includes("操作人不能为空") && !reason.includes("库存不足");
+}
+
 export default function TencentDocsSync() {
   const { hasRole } = useAuth();
   const [status, setStatus] = useState<SyncStatus | null>(null);
@@ -142,8 +147,9 @@ export default function TencentDocsSync() {
       });
       const result = response.data;
       message.success(result.message || "文件导入完成");
-      setErrors(result.errors || []);
-      if (result.errors?.length) {
+      const visibleErrors = (result.errors || []).filter(shouldShowImportError);
+      setErrors(visibleErrors);
+      if (visibleErrors.length) {
         setErrorModalOpen(true);
       }
       loadData();

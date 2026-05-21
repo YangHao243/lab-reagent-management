@@ -73,6 +73,8 @@ class ReagentResponse(ReagentBase, ORMResponseModel):
     id: int = Field(..., description="试剂 ID")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
+    adjustment_record_created: bool = Field(default=False, description="本次更新是否生成库存校正流水")
+    adjustment_record_id: int | None = Field(default=None, description="本次生成的库存校正流水 ID")
 
 
 class ReagentOptionResponse(BaseModel):

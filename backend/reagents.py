@@ -1,5 +1,6 @@
 """试剂信息管理 API。"""
 
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,9 +8,10 @@ from sqlalchemy import distinct, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from audit_logs import create_audit_log
 from database import get_db
 from dependencies import get_current_user, require_roles
-from models import Reagent, User
+from models import InventoryRecord, Reagent, User
 from schemas import ReagentCreate, ReagentOptionResponse, ReagentResponse, ReagentUpdate
 
 
@@ -235,19 +237,67 @@ def update_reagent(
     reagent_in: ReagentUpdate,
     current_user: User = Depends(require_roles("manager", "admin", "superadmin")),
     db: Session = Depends(get_db),
-) -> Reagent:
-    """更新试剂基础信息，不处理入库、出库、库存校正。"""
+) -> dict[str, Any]:
+    """更新试剂基础信息；手动修改当前库存时自动生成库存校正流水。"""
 
-    _ = current_user
     reagent = get_reagent_or_404(db, reagent_id)
     update_data = reagent_in.model_dump(exclude_unset=True)
+    old_quantity = float(reagent.current_quantity)
+    stock_was_updated = "current_quantity" in update_data
+    adjustment_record: InventoryRecord | None = None
+    audit_detail: str | None = None
+
+    if stock_was_updated and update_data["current_quantity"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前库存不能为空",
+        )
 
     for field, value in update_data.items():
         setattr(reagent, field, value)
 
+    if stock_was_updated:
+        new_quantity = float(update_data["current_quantity"])
+        quantity_change = new_quantity - old_quantity
+        if quantity_change != 0:
+            now = datetime.utcnow()
+            adjustment_record = InventoryRecord(
+                reagent_id=reagent.id,
+                operation_type="adjust",
+                quantity_change=quantity_change,
+                before_quantity=old_quantity,
+                after_quantity=new_quantity,
+                operator_id=current_user.id,
+                operator_name=current_user.username or "-",
+                reason="库存校正",
+                remark=f"管理员手动校正库存数量：{old_quantity:g} → {new_quantity:g}",
+                event_date=date.today(),
+                source="manual",
+                created_at=now,
+            )
+            db.add(adjustment_record)
+            audit_detail = (
+                f"试剂名称：{reagent.name_cn}；"
+                f"原库存：{old_quantity:g}；"
+                f"校正后库存：{new_quantity:g}；"
+                f"变化数量：{quantity_change:g}；"
+                f"操作用户：{current_user.username}"
+            )
+
     try:
+        if adjustment_record is not None:
+            create_audit_log(
+                db=db,
+                user_id=current_user.id,
+                action="stock_adjustment",
+                target_type="reagent",
+                target_id=reagent.id,
+                detail=audit_detail,
+            )
         db.commit()
         db.refresh(reagent)
+        if adjustment_record is not None:
+            db.refresh(adjustment_record)
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(
@@ -255,7 +305,10 @@ def update_reagent(
             detail="更新试剂失败",
         ) from exc
 
-    return reagent
+    response_data = ReagentResponse.model_validate(reagent).model_dump()
+    response_data["adjustment_record_created"] = adjustment_record is not None
+    response_data["adjustment_record_id"] = adjustment_record.id if adjustment_record else None
+    return response_data
 
 
 @router.delete(
