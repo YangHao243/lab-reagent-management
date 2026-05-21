@@ -18,6 +18,8 @@ from database import get_db
 from dependencies import get_current_user, require_roles
 from models import InventoryRecord, Reagent, User
 from schemas import (
+    InventoryBatchDeleteRequest,
+    InventoryBatchDeleteResponse,
     InventoryEditRequest,
     InventoryOperationRequest,
     InventoryOperationResponse,
@@ -491,6 +493,34 @@ def get_inventory_record(
     return record
 
 
+@router.post(
+    "/records/batch-delete",
+    response_model=InventoryBatchDeleteResponse,
+    summary="批量删除库存流水（仅超级管理员）",
+)
+def batch_delete_inventory_records(
+    payload: InventoryBatchDeleteRequest,
+    current_user: User = Depends(require_roles("superadmin")),
+    db: Session = Depends(get_db),
+) -> InventoryBatchDeleteResponse:
+    """批量删除库存流水，并按受影响试剂逐个重算库存。"""
+
+    _ = current_user
+    try:
+        result = delete_inventory_records_in_transaction(db, payload.record_ids)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="批量删除库存流水失败",
+        ) from exc
+    return result
+
+
 def recalculate_reagent_inventory(
     db: Session,
     reagent_id: int,
@@ -502,6 +532,7 @@ def recalculate_reagent_inventory(
 
     删除流水时通过 exclude_record_id 显式排除待删记录，不依赖 SQLAlchemy
     autoflush 行为；剩余流水按 created_at + id 稳定排序，从 0 开始重放。
+    业务上允许删除后库存短暂为负数，便于管理员后续在试剂库存页手动校正。
     """
 
     stmt = select(InventoryRecord).where(InventoryRecord.reagent_id == reagent_id)
@@ -528,24 +559,19 @@ def recalculate_reagent_inventory(
             after_quantity = before_quantity + quantity_change
 
         if after_quantity < 0:
-            if action == "delete":
-                detail = "删除该库存流水后，后续出库记录会导致库存为负，操作已取消。"
-                if normalize_operation_type(deleted_operation_type) == "out":
-                    logger.warning(
-                        "Deleting outbound inventory record still produced negative stock; "
-                        "reagent_id=%s excluded_record_id=%s failed_record_id=%s "
-                        "failed_operation_type=%s failed_quantity_change=%s",
-                        reagent_id,
-                        exclude_record_id,
-                        record.id,
-                        record.operation_type,
-                        record.quantity_change,
-                    )
-            else:
-                detail = "修改该流水后，后续库存会出现负数，请检查数量或时间。"
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=detail,
+            logger.warning(
+                "Inventory recompute produced negative stock; action=%s reagent_id=%s "
+                "excluded_record_id=%s deleted_operation_type=%s record_id=%s "
+                "operation_type=%s before=%s delta=%s after=%s",
+                action,
+                reagent_id,
+                exclude_record_id,
+                deleted_operation_type,
+                record.id,
+                record.operation_type,
+                before_quantity,
+                quantity_change,
+                after_quantity,
             )
 
         # 将历史中文类型和符号不一致的数量同步修正为系统内部规则。
@@ -558,6 +584,52 @@ def recalculate_reagent_inventory(
     reagent = db.get(Reagent, reagent_id)
     if reagent is not None:
         reagent.current_quantity = running
+
+
+def delete_inventory_records_in_transaction(
+    db: Session,
+    record_ids: list[int],
+) -> InventoryBatchDeleteResponse:
+    """删除一批库存流水并重算受影响试剂库存，不主动提交事务。"""
+
+    unique_ids = list(dict.fromkeys(record_ids))
+    if not unique_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请先选择要删除的库存流水记录",
+        )
+    if any(record_id <= 0 for record_id in unique_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="库存流水记录 ID 必须为正整数",
+        )
+
+    records = list(
+        db.execute(
+            select(InventoryRecord).where(InventoryRecord.id.in_(unique_ids))
+        ).scalars().all()
+    )
+    record_map = {record.id: record for record in records}
+    missing_ids = [record_id for record_id in unique_ids if record_id not in record_map]
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"库存流水记录不存在：{missing_ids}",
+        )
+
+    affected_reagent_ids = sorted({record.reagent_id for record in records})
+    for record in records:
+        db.delete(record)
+
+    # SessionLocal 关闭了 autoflush，这里显式 flush，确保后续重算查询不到已删除记录。
+    db.flush()
+    for reagent_id in affected_reagent_ids:
+        recalculate_reagent_inventory(db, reagent_id)
+
+    return InventoryBatchDeleteResponse(
+        deleted_count=len(records),
+        affected_reagent_ids=affected_reagent_ids,
+    )
 
 
 @router.put(
@@ -632,17 +704,9 @@ def delete_inventory_record(
             detail="库存记录不存在",
         )
 
-    reagent_id = record.reagent_id
-    deleted_operation_type = record.operation_type
+    _ = record
     try:
-        recalculate_reagent_inventory(
-            db,
-            reagent_id,
-            exclude_record_id=record_id,
-            action="delete",
-            deleted_operation_type=deleted_operation_type,
-        )
-        db.delete(record)
+        delete_inventory_records_in_transaction(db, [record_id])
         db.commit()
     except HTTPException:
         db.rollback()

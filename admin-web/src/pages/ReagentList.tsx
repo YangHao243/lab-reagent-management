@@ -233,7 +233,6 @@ export default function ReagentList() {
             { title: "ID", dataIndex: "id", width: 70 },
             { title: "中文名", dataIndex: "name_cn", width: 180 },
             { title: "英文名", dataIndex: "name_en", width: 300, ellipsis: true },
-            { title: "CAS号", dataIndex: "cas_no", width: 110 },
             { title: "分类", dataIndex: "category", width: 120 },
             {
               title: "当前库存",

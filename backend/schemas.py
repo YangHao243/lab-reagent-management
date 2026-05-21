@@ -29,7 +29,7 @@ class ReagentBase(BaseModel):
     category: str | None = Field(default=None, description="试剂分类")
     specification: str | None = Field(default=None, description="规格，例如 500ml、100g")
     unit: str = Field(default="瓶", description="库存单位，例如 瓶、盒、克、毫升")
-    current_quantity: float = Field(default=0.0, ge=0, description="当前库存数量")
+    current_quantity: float = Field(default=0.0, description="当前库存数量，删除历史流水后可能短暂为负数")
     warning_threshold: float = Field(default=10.0, ge=0, description="低库存报警阈值")
     location: str | None = Field(default=None, description="存放位置")
     supplier: str | None = Field(default=None, description="供应商")
@@ -57,7 +57,7 @@ class ReagentUpdate(BaseModel):
     category: str | None = Field(default=None, description="试剂分类")
     specification: str | None = Field(default=None, description="规格，例如 500ml、100g")
     unit: str | None = Field(default=None, description="库存单位，例如 瓶、盒、克、毫升")
-    current_quantity: float | None = Field(default=None, ge=0, description="当前库存数量")
+    current_quantity: float | None = Field(default=None, description="当前库存数量，删除历史流水后可能短暂为负数")
     warning_threshold: float | None = Field(default=None, ge=0, description="低库存报警阈值")
     location: str | None = Field(default=None, description="存放位置")
     supplier: str | None = Field(default=None, description="供应商")
@@ -109,6 +109,19 @@ class InventoryEditRequest(BaseModel):
     operator_name: str | None = Field(default=None, min_length=1, max_length=50, description="操作员姓名")
     reason: str | None = Field(default=None, description="操作原因")
     remark: str | None = Field(default=None, description="备注")
+
+
+class InventoryBatchDeleteRequest(BaseModel):
+    """库存流水批量删除请求。"""
+
+    record_ids: list[int] = Field(default_factory=list, description="要删除的库存流水记录 ID 列表")
+
+
+class InventoryBatchDeleteResponse(BaseModel):
+    """库存流水批量删除响应。"""
+
+    deleted_count: int = Field(..., description="实际删除的库存流水记录数量")
+    affected_reagent_ids: list[int] = Field(..., description="受影响并已重新计算库存的试剂 ID")
 
 
 class InventoryRecordResponse(ORMResponseModel):

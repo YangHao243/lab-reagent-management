@@ -16,7 +16,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Key } from "react";
 import { apiClient } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
@@ -87,6 +87,11 @@ type InventoryCalendarResponse = {
   days: CalendarDay[];
 };
 
+type BatchDeleteResponse = {
+  deleted_count: number;
+  affected_reagent_ids: number[];
+};
+
 const operationMeta: Record<OperationType, { color: string; label: string }> = {
   in: { color: "green", label: "入库" },
   out: { color: "red", label: "出库" },
@@ -155,9 +160,12 @@ export default function InventoryRecords() {
   const [editingRecord, setEditingRecord] = useState<InventoryRecord | null>(null);
   const [editForm] = Form.useForm();
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [selectedRecordIds, setSelectedRecordIds] = useState<number[]>([]);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   // 加载出入库记录，筛选条件直接传给后端，避免前端重复过滤。
   const loadRecords = (nextType?: OperationType, nextYear = year) => {
+    setSelectedRecordIds([]);
     setLoading(true);
     apiClient
       .get<InventoryRecord[]>("/inventory/records", {
@@ -272,10 +280,37 @@ export default function InventoryRecords() {
       await apiClient.delete(`/inventory/records/${record.id}`);
       message.success("库存流水已删除");
       loadRecords(operationType);
+      loadReagents();
       refreshRelatedData();
       loadCalendar();
     } catch (error) {
       message.error(getApiError(error, "删除库存流水失败"));
+    }
+  };
+
+  // 批量删除库存流水，后端会按受影响试剂统一重算库存。
+  const batchDeleteRecords = async () => {
+    if (selectedRecordIds.length === 0) {
+      message.warning("请先选择要删除的库存流水记录");
+      return;
+    }
+
+    setBatchDeleting(true);
+    try {
+      const response = await apiClient.post<BatchDeleteResponse>(
+        "/inventory/records/batch-delete",
+        { record_ids: selectedRecordIds },
+      );
+      message.success(`已删除 ${response.data.deleted_count} 条库存流水记录`);
+      setSelectedRecordIds([]);
+      loadRecords(operationType);
+      loadReagents();
+      refreshRelatedData();
+      loadCalendar();
+    } catch (error) {
+      message.error(getApiError(error, "批量删除库存流水失败"));
+    } finally {
+      setBatchDeleting(false);
     }
   };
 
@@ -446,13 +481,43 @@ export default function InventoryRecords() {
                       { label: "校正", value: "adjust" },
                     ]}
                   />
+                  {canEditRecord && (
+                    <Popconfirm
+                      title={`确认删除选中的 ${selectedRecordIds.length} 条库存流水记录？`}
+                      description="删除后将重新计算相关试剂库存及流水前后数量。此操作仅超级管理员可执行。是否继续？"
+                      okText="确认删除"
+                      cancelText="取消"
+                      disabled={selectedRecordIds.length === 0 || batchDeleting}
+                      onConfirm={batchDeleteRecords}
+                    >
+                      <Button
+                        danger
+                        disabled={selectedRecordIds.length === 0}
+                        loading={batchDeleting}
+                      >
+                        {selectedRecordIds.length > 0
+                          ? `批量删除（${selectedRecordIds.length}）`
+                          : "批量删除"}
+                      </Button>
+                    </Popconfirm>
+                  )}
                 </Space>
                 <Table
                   rowKey="id"
                   size="small"
                   loading={loading}
                   dataSource={records}
-                  pagination={{ pageSize: 12 }}
+                  rowSelection={
+                    canEditRecord
+                      ? {
+                          selectedRowKeys: selectedRecordIds,
+                          onChange: (selectedRowKeys: Key[]) => {
+                            setSelectedRecordIds(selectedRowKeys.map((key) => Number(key)));
+                          },
+                        }
+                      : undefined
+                  }
+                  pagination={{ pageSize: 12, onChange: () => setSelectedRecordIds([]) }}
                   columns={columns}
                   scroll={{ x: 1240 }}
                 />

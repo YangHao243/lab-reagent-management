@@ -295,28 +295,151 @@ def test_delete_first_out_record_recomputes_following_records(client: TestClient
         db.close()
 
 
-def test_delete_in_record_is_blocked_when_following_out_goes_negative(
+def test_delete_in_record_allows_following_out_to_go_negative(
     client: TestClient,
 ) -> None:
-    """删除历史入库导致剩余出库为负时，应阻止删除并回滚。"""
+    """删除历史入库导致剩余出库为负时，现在允许删除并保留负库存。"""
 
     headers = auth_headers(client)
-    reagent_id = create_test_reagent(client, headers, "删除入库负库存拦截")
+    reagent_id = create_test_reagent(client, headers, "删除入库允许负库存")
     in_record = stock_in(client, headers, reagent_id, 100)
-    stock_out(client, headers, reagent_id, 80)
+
+    db = SessionLocal()
+    try:
+        reagent = db.get(Reagent, reagent_id)
+        assert reagent is not None
+        out_record = InventoryRecord(
+            reagent_id=reagent_id,
+            operation_type="out",
+            quantity_change=-150,
+            before_quantity=100,
+            after_quantity=-50,
+            operator_name="测试员",
+            reason="实验领用",
+            created_at=datetime(2026, 1, 2, 9, 0, 0),
+        )
+        reagent.current_quantity = -50
+        db.add(out_record)
+        db.commit()
+        db.refresh(out_record)
+        out_record_id = out_record.id
+    finally:
+        db.close()
 
     response = client.delete(f"/inventory/records/{in_record['id']}", headers=headers)
 
-    assert response.status_code == 400
-    assert "库存为负" in response.json()["detail"]
-    assert get_stock(client, headers, reagent_id) == 20
+    assert response.status_code == 200
+    assert get_stock(client, headers, reagent_id) == -150
 
     db = SessionLocal()
     try:
         remaining_in = db.get(InventoryRecord, in_record["id"])
-        assert remaining_in is not None
+        remaining_out = db.get(InventoryRecord, out_record_id)
+        assert remaining_in is None
+        assert remaining_out is not None
+        assert remaining_out.before_quantity == 0
+        assert remaining_out.after_quantity == -150
     finally:
         db.close()
+
+
+def test_batch_delete_same_reagent_out_records(client: TestClient) -> None:
+    """批量删除同一试剂的两条出库记录后，库存应回到入库后的数量。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "批量删除同试剂出库")
+    stock_in(client, headers, reagent_id, 100)
+    first_out = stock_out(client, headers, reagent_id, 20)
+    second_out = stock_out(client, headers, reagent_id, 30)
+
+    response = client.post(
+        "/inventory/records/batch-delete",
+        json={"record_ids": [first_out["id"], second_out["id"]]},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deleted_count"] == 2
+    assert data["affected_reagent_ids"] == [reagent_id]
+    assert get_stock(client, headers, reagent_id) == 100
+
+
+def test_batch_delete_multiple_reagents(client: TestClient) -> None:
+    """批量删除涉及多个试剂时，应分别重算各自库存。"""
+
+    headers = auth_headers(client)
+    reagent_a = create_test_reagent(client, headers, "批量删除试剂A")
+    reagent_b = create_test_reagent(client, headers, "批量删除试剂B")
+    stock_in(client, headers, reagent_a, 100)
+    stock_in(client, headers, reagent_b, 50)
+    out_a = stock_out(client, headers, reagent_a, 20)
+    out_b = stock_out(client, headers, reagent_b, 10)
+
+    response = client.post(
+        "/inventory/records/batch-delete",
+        json={"record_ids": [out_a["id"], out_b["id"]]},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deleted_count"] == 2
+    assert sorted(data["affected_reagent_ids"]) == sorted([reagent_a, reagent_b])
+    assert get_stock(client, headers, reagent_a) == 100
+    assert get_stock(client, headers, reagent_b) == 50
+
+
+def test_batch_delete_forbidden_for_member(client: TestClient) -> None:
+    """非超级管理员批量删除库存流水应返回 403，数据不变。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "成员禁止批量删除")
+    stock_in(client, headers, reagent_id, 100)
+    out_record = stock_out(client, headers, reagent_id, 20)
+
+    create_member_response = client.post(
+        "/users/register",
+        json={
+            "username": "batch-member",
+            "password": "Member@123456",
+            "full_name": "普通成员",
+            "role": "member",
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert create_member_response.status_code == 201
+    member_login_response = client.post(
+        "/users/login",
+        json={"username": "batch-member", "password": "Member@123456"},
+    )
+    assert member_login_response.status_code == 200
+    member_headers = {
+        "Authorization": f"Bearer {member_login_response.json()['access_token']}"
+    }
+
+    response = client.post(
+        "/inventory/records/batch-delete",
+        json={"record_ids": [out_record["id"]]},
+        headers=member_headers,
+    )
+
+    assert response.status_code == 403
+    assert get_stock(client, headers, reagent_id) == 80
+
+
+def test_batch_delete_empty_record_ids_returns_400(client: TestClient) -> None:
+    """批量删除空列表应返回 400。"""
+
+    headers = auth_headers(client)
+    response = client.post(
+        "/inventory/records/batch-delete",
+        json={"record_ids": []},
+        headers=headers,
+    )
+
+    assert response.status_code == 400
 
 
 def test_delete_out_between_in_records_recomputes_stock(client: TestClient) -> None:
