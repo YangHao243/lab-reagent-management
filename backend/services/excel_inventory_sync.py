@@ -27,7 +27,7 @@ from models import InventoryRecord, Reagent
 from services.sync_core import ImportService, NormalizedInventoryRecord, SyncImportResult
 
 
-SHEET_NAME_PATTERN = re.compile(r"^\s*(\d{4})\.(\d{1,2})\s*$")
+SHEET_NAME_PATTERN = re.compile(r"^\s*(\d{4})[._-](\d{1,2})\s*$")
 OPERATION_MAPPING = {
     "入库": "in",
     "领取": "out",
@@ -189,8 +189,8 @@ def clean_quantity(value: Any) -> float:
     return quantity
 
 
-def parse_sheet_period(sheet_name: str) -> tuple[int, int] | None:
-    """从 sheet 名识别年份和月份。"""
+def parse_sheet_year_month(sheet_name: str) -> tuple[int, int] | None:
+    """从 sheet 名识别年份和月份，支持 2026.5 / 2026.05 / 2026-5 / 2026_5。"""
 
     match = SHEET_NAME_PATTERN.match(sheet_name)
     if match is None:
@@ -203,28 +203,84 @@ def parse_sheet_period(sheet_name: str) -> tuple[int, int] | None:
     return year, month
 
 
-def parse_day(value: Any, fallback_day: int, year: int, month: int) -> int:
-    """从左侧日期列解析日，空值时按行号兜底。"""
+def parse_sheet_period(sheet_name: str) -> tuple[int, int] | None:
+    """兼容旧函数名，内部统一使用 parse_sheet_year_month。"""
 
-    day: int
-    if is_blank(value):
-        day = fallback_day
+    return parse_sheet_year_month(sheet_name)
+
+
+def row_has_operation(dataframe: pd.DataFrame, row_index: int, groups: list[tuple[str, int]]) -> bool:
+    """判断当前数据行是否存在任意试剂操作内容。"""
+
+    for _, column_index in groups:
+        if column_index + 2 >= len(dataframe.columns):
+            continue
+        operation_text = clean_text(dataframe.iat[row_index, column_index])
+        quantity_cell = dataframe.iat[row_index, column_index + 1]
+        operator_name = clean_text(dataframe.iat[row_index, column_index + 2])
+        if operation_text or not is_blank(quantity_cell) or operator_name:
+            return True
+    return False
+
+
+def parse_row_date(sheet_name: str, row_number: int, row_date_cell: Any) -> date:
+    """根据 sheet 年月和 A 列当前行日期生成业务日期。
+
+    A 列为数字或数字字符串时只取“日”；A 列为真实日期/datetime 时优先使用
+    该日期，同时校验它是否与 sheet 年月一致。
+    """
+
+    period = parse_sheet_year_month(sheet_name)
+    if period is None:
+        raise ValueError(f"无法从 sheet 名识别年月：{sheet_name}")
+
+    year, month = period
+    _ = row_number
+    if is_blank(row_date_cell):
+        raise ValueError("A列日期不能为空")
+
+    value = row_date_cell
+    parsed_date: date | None = None
+
+    if isinstance(value, datetime):
+        parsed_date = value.date()
+    elif isinstance(value, date):
+        parsed_date = value
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        if float(value) != int(value):
+            raise ValueError(f"A列日期必须是整数日：{value}")
+        day = int(value)
+        max_day = calendar.monthrange(year, month)[1]
+        if not 1 <= day <= max_day:
+            raise ValueError(f"日期超出当月范围：{day}")
+        return date(year, month, day)
     else:
-        parsed_datetime = pd.to_datetime(value, errors="coerce")
-        if not pd.isna(parsed_datetime):
-            day = int(parsed_datetime.day)
-        else:
-            text_value = str(value).strip()
-            match = re.search(r"\d+", text_value)
-            if match is None:
-                day = fallback_day
-            else:
-                day = int(match.group(0))
+        text_value = str(value).strip()
+        if re.fullmatch(r"\d+(\.0+)?", text_value):
+            day = int(float(text_value))
+            max_day = calendar.monthrange(year, month)[1]
+            if not 1 <= day <= max_day:
+                raise ValueError(f"日期超出当月范围：{day}")
+            return date(year, month, day)
 
-    max_day = calendar.monthrange(year, month)[1]
-    if not 1 <= day <= max_day:
-        raise ValueError(f"日期超出当月范围：{day}")
-    return day
+        parsed_datetime = pd.to_datetime(text_value, errors="coerce")
+        if pd.isna(parsed_datetime):
+            raise ValueError(f"A列日期无法识别：{text_value}")
+        parsed_date = parsed_datetime.date()
+
+    if parsed_date.year != year or parsed_date.month != month:
+        raise ValueError(
+            f"A列日期 {parsed_date.isoformat()} 与 sheet 年月 {year}-{month:02d} 不一致"
+        )
+    return parsed_date
+
+
+def parse_day(value: Any, fallback_day: int, year: int, month: int) -> int:
+    """兼容旧函数名：从 A 列解析日，空值不再按行号兜底。"""
+
+    _ = fallback_day
+    parsed_date = parse_row_date(f"{year}.{month}", 0, value)
+    return parsed_date.day
 
 
 def canonical_text(value: str | None) -> str:
@@ -411,25 +467,28 @@ def import_excel_inventory(
             parse_result.add_error(sheet_name, 2, None, "未识别到试剂名称表头")
             continue
 
-        max_day = calendar.monthrange(year, month)[1]
         for row_index in range(3, min(len(dataframe.index), 34)):
             excel_row = row_index + 1
-            fallback_day = row_index - 2
-            if fallback_day > max_day:
-                continue
-
             try:
-                day = parse_day(
-                    dataframe.iat[row_index, 0],
-                    fallback_day=fallback_day,
-                    year=year,
-                    month=month,
-                )
+                event_date = parse_row_date(sheet_name, excel_row, dataframe.iat[row_index, 0])
             except ValueError as exc:
-                parse_result.add_error(sheet_name, excel_row, None, str(exc))
+                if row_has_operation(dataframe, row_index, groups):
+                    affected_reagents: list[str] = []
+                    for reagent_name, column_index in groups:
+                        if column_index + 2 >= len(dataframe.columns):
+                            continue
+                        operation_text = clean_text(dataframe.iat[row_index, column_index])
+                        quantity_cell = dataframe.iat[row_index, column_index + 1]
+                        operator_name = clean_text(dataframe.iat[row_index, column_index + 2])
+                        if operation_text or not is_blank(quantity_cell) or operator_name:
+                            affected_reagents.append(reagent_name)
+                    parse_result.add_error(
+                        sheet_name,
+                        excel_row,
+                        "、".join(affected_reagents) if affected_reagents else None,
+                        str(exc),
+                    )
                 continue
-
-            event_date = date(year, month, day)
 
             for reagent_name, column_index in groups:
                 if column_index + 2 >= len(dataframe.columns):
@@ -504,6 +563,11 @@ def import_excel_inventory(
                 seen_hashes.add(source_hash)
 
     import_result = ImportService(db=db, operator_id=operator_id).import_records(normalized_records)
+    monthly_counts: dict[str, int] = {}
+    for record in normalized_records:
+        key = f"{record.year}-{record.month:02d}"
+        monthly_counts[key] = monthly_counts.get(key, 0) + 1
+    import_result.monthly_counts = monthly_counts
     import_result.skipped += parse_result.skipped
     import_result.failed += parse_result.failed
     import_result.errors = parse_result.errors + import_result.errors

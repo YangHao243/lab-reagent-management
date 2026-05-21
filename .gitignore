@@ -22,10 +22,13 @@
 # --- 数据导出与备份 ---
 exports/
 backend/exports/
+backups/
+backend/backups/
 *_backup/
 versions_backup/
 *.export.json
 sqlite_export_*.json
+pg_backup_*.json
 
 # --- Python ---
 __pycache__/

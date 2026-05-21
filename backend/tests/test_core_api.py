@@ -5,6 +5,7 @@
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ from auth import hash_password  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 import models  # noqa: E402,F401
 from main import app  # noqa: E402
-from models import User  # noqa: E402
+from models import InventoryRecord, Reagent, User  # noqa: E402
 
 
 @pytest.fixture()
@@ -57,6 +58,84 @@ def auth_headers(client: TestClient) -> dict[str, str]:
     assert response.status_code == 200
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+def create_test_reagent(client: TestClient, headers: dict[str, str], name: str) -> int:
+    """创建一个库存从 0 开始的测试试剂。"""
+
+    response = client.post(
+        "/reagents/",
+        json={
+            "name_cn": name,
+            "name_en": name,
+            "cas_no": f"TEST-{name}",
+            "category": "测试分类",
+            "specification": "测试规格",
+            "unit": "瓶",
+            "current_quantity": 0,
+            "warning_threshold": 1,
+            "location": "测试位置",
+            "hazard_level": "测试",
+            "remark": "库存重算测试",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def stock_in(
+    client: TestClient,
+    headers: dict[str, str],
+    reagent_id: int,
+    quantity: int,
+) -> dict:
+    """执行一次测试入库。"""
+
+    response = client.post(
+        "/inventory/in",
+        json={
+            "reagent_id": reagent_id,
+            "quantity": quantity,
+            "operator_name": "测试员",
+            "reason": "领料入库",
+            "remark": "pytest 入库",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def stock_out(
+    client: TestClient,
+    headers: dict[str, str],
+    reagent_id: int,
+    quantity: int,
+) -> dict:
+    """执行一次测试出库。"""
+
+    response = client.post(
+        "/inventory/out",
+        json={
+            "reagent_id": reagent_id,
+            "quantity": quantity,
+            "operator_name": "测试员",
+            "reason": "实验领用",
+            "remark": "pytest 出库",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def get_stock(client: TestClient, headers: dict[str, str], reagent_id: int) -> float:
+    """查询指定试剂当前库存。"""
+
+    response = client.get(f"/inventory/stock/{reagent_id}", headers=headers)
+    assert response.status_code == 200
+    return response.json()["current_quantity"]
 
 
 def test_health(client: TestClient) -> None:
@@ -103,6 +182,7 @@ def test_reagent_inventory_and_alert_flow(client: TestClient) -> None:
         json={
             "reagent_id": reagent_id,
             "quantity": 3,
+            "operator_name": "测试员",
             "reason": "领料入库",
             "remark": "接口测试入库",
         },
@@ -119,6 +199,7 @@ def test_reagent_inventory_and_alert_flow(client: TestClient) -> None:
         json={
             "reagent_id": reagent_id,
             "quantity": 2,
+            "operator_name": "测试员",
             "reason": "实验领用",
             "remark": "接口测试出库",
         },
@@ -174,3 +255,127 @@ def test_auth_required_and_role_forbidden(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {member_token}"},
     )
     assert forbidden_response.status_code == 403
+
+
+def test_delete_out_record_restores_stock(client: TestClient) -> None:
+    """入库 100 -> 出库 20 -> 删除出库，库存应恢复为 100。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "删除出库恢复库存")
+    stock_in(client, headers, reagent_id, 100)
+    out_record = stock_out(client, headers, reagent_id, 20)
+
+    response = client.delete(f"/inventory/records/{out_record['id']}", headers=headers)
+
+    assert response.status_code == 200
+    assert get_stock(client, headers, reagent_id) == 100
+
+
+def test_delete_first_out_record_recomputes_following_records(client: TestClient) -> None:
+    """删除第一条出库后，后续出库 before/after 应重新计算。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "删除第一条出库重算")
+    stock_in(client, headers, reagent_id, 100)
+    first_out = stock_out(client, headers, reagent_id, 20)
+    second_out = stock_out(client, headers, reagent_id, 30)
+
+    response = client.delete(f"/inventory/records/{first_out['id']}", headers=headers)
+
+    assert response.status_code == 200
+    assert get_stock(client, headers, reagent_id) == 70
+
+    db = SessionLocal()
+    try:
+        second_record = db.get(InventoryRecord, second_out["id"])
+        assert second_record is not None
+        assert second_record.before_quantity == 100
+        assert second_record.after_quantity == 70
+    finally:
+        db.close()
+
+
+def test_delete_in_record_is_blocked_when_following_out_goes_negative(
+    client: TestClient,
+) -> None:
+    """删除历史入库导致剩余出库为负时，应阻止删除并回滚。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "删除入库负库存拦截")
+    in_record = stock_in(client, headers, reagent_id, 100)
+    stock_out(client, headers, reagent_id, 80)
+
+    response = client.delete(f"/inventory/records/{in_record['id']}", headers=headers)
+
+    assert response.status_code == 400
+    assert "库存为负" in response.json()["detail"]
+    assert get_stock(client, headers, reagent_id) == 20
+
+    db = SessionLocal()
+    try:
+        remaining_in = db.get(InventoryRecord, in_record["id"])
+        assert remaining_in is not None
+    finally:
+        db.close()
+
+
+def test_delete_out_between_in_records_recomputes_stock(client: TestClient) -> None:
+    """入库 100 -> 出库 20 -> 入库 10，删除出库后库存应为 110。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "删除中间出库重算")
+    stock_in(client, headers, reagent_id, 100)
+    out_record = stock_out(client, headers, reagent_id, 20)
+    stock_in(client, headers, reagent_id, 10)
+
+    response = client.delete(f"/inventory/records/{out_record['id']}", headers=headers)
+
+    assert response.status_code == 200
+    assert get_stock(client, headers, reagent_id) == 110
+
+
+def test_recompute_is_stable_when_records_have_same_created_at(
+    client: TestClient,
+) -> None:
+    """多条相同 created_at 流水应按 id 二级排序稳定重算。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "相同时间稳定排序")
+    in_record = stock_in(client, headers, reagent_id, 100)
+    first_out = stock_out(client, headers, reagent_id, 20)
+    second_out = stock_out(client, headers, reagent_id, 30)
+
+    same_time = datetime(2026, 1, 1, 9, 0, 0)
+    db = SessionLocal()
+    try:
+        for record_id in [in_record["id"], first_out["id"], second_out["id"]]:
+            record = db.get(InventoryRecord, record_id)
+            assert record is not None
+            record.created_at = same_time
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.delete(f"/inventory/records/{first_out['id']}", headers=headers)
+
+    assert response.status_code == 200
+    assert get_stock(client, headers, reagent_id) == 70
+
+
+def test_signed_quantity_keeps_negative_outbound_quantity() -> None:
+    """历史出库数量已经为负数时，不应重复取负。"""
+
+    from inventory import get_signed_quantity
+
+    assert get_signed_quantity("out", -20) == -20
+    assert get_signed_quantity("出库", -20) == -20
+
+
+def test_signed_quantity_converts_positive_outbound_quantity() -> None:
+    """历史出库/领取数量为正数时，应按操作类型转为负数。"""
+
+    from inventory import get_signed_quantity
+
+    assert get_signed_quantity("out", 20) == -20
+    assert get_signed_quantity("领取", 20) == -20
+    assert get_signed_quantity("in", -10) == 10

@@ -71,6 +71,7 @@ class SyncImportResult:
     failed: int = 0
     created_reagents: int = 0
     updated_reagents: int = 0
+    monthly_counts: dict[str, int] = field(default_factory=dict)
     errors: list[SyncErrorItem] = field(default_factory=list)
 
     @property
@@ -109,6 +110,7 @@ class SyncImportResult:
             "errors": [error.to_dict() for error in self.errors],
             "created_reagents": self.created_reagents,
             "updated_reagents": self.updated_reagents,
+            "monthly_counts": self.monthly_counts,
         }
         if log_id is not None:
             data["log_id"] = log_id
@@ -125,6 +127,7 @@ class SyncImportResult:
                 "created_reagents": self.created_reagents,
                 "updated_reagents": self.updated_reagents,
                 "errors": [error.to_dict() for error in self.errors[:200]],
+                "monthly_counts": self.monthly_counts,
             },
             ensure_ascii=False,
         )

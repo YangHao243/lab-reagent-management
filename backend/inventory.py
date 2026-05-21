@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, time
 from typing import Literal
 
@@ -26,8 +27,42 @@ from schemas import (
 
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
+logger = logging.getLogger(__name__)
 
 VALID_REASONS = {"领料入库", "实验领用", "其他原因"}
+IN_OPERATION_TYPES = {"in", "stock_in", "入库", "领料入库", "采购入库"}
+OUT_OPERATION_TYPES = {"out", "stock_out", "出库", "领取", "领用", "消耗", "实验领用", "领料"}
+ADJUST_OPERATION_TYPES = {"adjust", "stock_adjust", "校正", "调整", "库存校正"}
+
+
+def normalize_operation_type(operation_type: str | None) -> str:
+    """统一库存操作类型，兼容历史中文流水和英文系统流水。"""
+
+    value = (operation_type or "").strip()
+    lowered = value.lower()
+    if lowered in IN_OPERATION_TYPES or value in IN_OPERATION_TYPES:
+        return "in"
+    if lowered in OUT_OPERATION_TYPES or value in OUT_OPERATION_TYPES:
+        return "out"
+    if lowered in ADJUST_OPERATION_TYPES or value in ADJUST_OPERATION_TYPES:
+        return "adjust"
+    return lowered or value
+
+
+def get_signed_quantity(operation_type: str | None, quantity: float) -> float:
+    """根据操作类型得到带正负号的库存变化量。
+
+    历史数据中出库数量可能已经是负数，也可能是正数；这里统一保证出库为负、
+    入库为正，避免删除/编辑重算时重复取负或符号反转。
+    """
+
+    normalized_type = normalize_operation_type(operation_type)
+    raw_quantity = float(quantity)
+    if normalized_type == "in":
+        return abs(raw_quantity)
+    if normalized_type == "out":
+        return -abs(raw_quantity)
+    return raw_quantity
 
 
 def validate_inventory_quantity(quantity: object) -> int:
@@ -456,42 +491,69 @@ def get_inventory_record(
     return record
 
 
-def recalculate_reagent_inventory(db: Session, reagent_id: int) -> None:
-    """重新计算指定试剂所有库存流水的 before/after 数量及当前库存。
+def recalculate_reagent_inventory(
+    db: Session,
+    reagent_id: int,
+    exclude_record_id: int | None = None,
+    action: Literal["modify", "delete"] = "modify",
+    deleted_operation_type: str | None = None,
+) -> None:
+    """重新计算指定试剂库存流水的 before/after 数量及当前库存。
 
-    按 created_at asc, id asc 排序，从库存 0 开始逐条推算。
-    任何一步导致库存为负时抛出 400 错误并回滚。
+    删除流水时通过 exclude_record_id 显式排除待删记录，不依赖 SQLAlchemy
+    autoflush 行为；剩余流水按 created_at + id 稳定排序，从 0 开始重放。
     """
+
+    stmt = select(InventoryRecord).where(InventoryRecord.reagent_id == reagent_id)
+    if exclude_record_id is not None:
+        stmt = stmt.where(InventoryRecord.id != exclude_record_id)
 
     records = list(
         db.execute(
-            select(InventoryRecord)
-            .where(InventoryRecord.reagent_id == reagent_id)
-            .order_by(InventoryRecord.created_at.asc(), InventoryRecord.id.asc())
+            stmt.order_by(InventoryRecord.created_at.asc(), InventoryRecord.id.asc())
         ).scalars().all()
     )
 
     running = 0.0
     for record in records:
-        if record.operation_type == "in":
-            running += record.quantity_change
-        elif record.operation_type == "out":
-            running += record.quantity_change
-        elif record.operation_type == "adjust":
-            before = running
-            running = record.after_quantity
-            record.before_quantity = before
-            record.quantity_change = running - before
-            record.after_quantity = running
-            continue
+        normalized_type = normalize_operation_type(record.operation_type)
+        before_quantity = running
 
-        if running < 0:
+        if normalized_type == "adjust":
+            # 库存校正表示“校正后的最终库存”，因此以 after_quantity 作为目标值。
+            after_quantity = float(record.after_quantity)
+            quantity_change = after_quantity - before_quantity
+        else:
+            quantity_change = get_signed_quantity(normalized_type, record.quantity_change)
+            after_quantity = before_quantity + quantity_change
+
+        if after_quantity < 0:
+            if action == "delete":
+                detail = "删除该库存流水后，后续出库记录会导致库存为负，操作已取消。"
+                if normalize_operation_type(deleted_operation_type) == "out":
+                    logger.warning(
+                        "Deleting outbound inventory record still produced negative stock; "
+                        "reagent_id=%s excluded_record_id=%s failed_record_id=%s "
+                        "failed_operation_type=%s failed_quantity_change=%s",
+                        reagent_id,
+                        exclude_record_id,
+                        record.id,
+                        record.operation_type,
+                        record.quantity_change,
+                    )
+            else:
+                detail = "修改该流水后，后续库存会出现负数，请检查数量或时间。"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="修改或删除后库存不能为负，请检查该流水记录",
+                detail=detail,
             )
-        record.before_quantity = running - record.quantity_change
-        record.after_quantity = running
+
+        # 将历史中文类型和符号不一致的数量同步修正为系统内部规则。
+        record.operation_type = normalized_type
+        record.quantity_change = quantity_change
+        record.before_quantity = before_quantity
+        record.after_quantity = after_quantity
+        running = after_quantity
 
     reagent = db.get(Reagent, reagent_id)
     if reagent is not None:
@@ -523,17 +585,19 @@ def edit_inventory_record(
         )
 
     try:
-        if record.operation_type == "in":
-            record.quantity_change = payload.quantity
-        elif record.operation_type == "out":
-            record.quantity_change = -payload.quantity
+        normalized_type = normalize_operation_type(record.operation_type)
+        record.operation_type = normalized_type
+        if normalized_type in {"in", "out"}:
+            record.quantity_change = get_signed_quantity(normalized_type, payload.quantity)
         else:
-            record.quantity_change = payload.quantity - record.before_quantity
+            # 校正数量表示最终库存，重算时会据此更新 quantity_change。
+            record.after_quantity = float(payload.quantity)
+            record.quantity_change = float(payload.quantity) - record.before_quantity
 
         record.operator_name = operator_name
         record.reason = payload.reason
         record.remark = payload.remark
-        recalculate_reagent_inventory(db, record.reagent_id)
+        recalculate_reagent_inventory(db, record.reagent_id, action="modify")
         db.commit()
         db.refresh(record)
     except HTTPException:
@@ -569,9 +633,16 @@ def delete_inventory_record(
         )
 
     reagent_id = record.reagent_id
+    deleted_operation_type = record.operation_type
     try:
+        recalculate_reagent_inventory(
+            db,
+            reagent_id,
+            exclude_record_id=record_id,
+            action="delete",
+            deleted_operation_type=deleted_operation_type,
+        )
         db.delete(record)
-        recalculate_reagent_inventory(db, reagent_id)
         db.commit()
     except HTTPException:
         db.rollback()

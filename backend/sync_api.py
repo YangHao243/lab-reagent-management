@@ -75,6 +75,7 @@ class SyncImportResponse(BaseModel):
     failed_count: int = Field(default=0, description="兼容字段：失败数量")
     created_reagents: int = Field(default=0, description="新增试剂数量")
     updated_reagents: int = Field(default=0, description="更新试剂数量")
+    monthly_counts: dict[str, int] = Field(default_factory=dict, description="按月份统计的解析记录数量")
 
 
 class SyncExportResponse(BaseModel):
