@@ -1,6 +1,5 @@
 """试剂信息管理 API。"""
 
-from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,6 +12,7 @@ from database import get_db
 from dependencies import get_current_user, require_roles
 from models import InventoryRecord, Reagent, User
 from schemas import ReagentCreate, ReagentOptionResponse, ReagentResponse, ReagentUpdate
+from utils.timezone import now_beijing, today_beijing
 
 
 router = APIRouter(prefix="/reagents", tags=["reagents"])
@@ -260,7 +260,7 @@ def update_reagent(
         new_quantity = float(update_data["current_quantity"])
         quantity_change = new_quantity - old_quantity
         if quantity_change != 0:
-            now = datetime.utcnow()
+            now = now_beijing()
             adjustment_record = InventoryRecord(
                 reagent_id=reagent.id,
                 operation_type="adjust",
@@ -271,7 +271,7 @@ def update_reagent(
                 operator_name=current_user.username or "-",
                 reason="库存校正",
                 remark=f"管理员手动校正库存数量：{old_quantity:g} → {new_quantity:g}",
-                event_date=date.today(),
+                event_date=today_beijing(),
                 source="manual",
                 created_at=now,
             )

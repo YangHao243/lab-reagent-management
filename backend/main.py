@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime
 from importlib import import_module
 import logging
 
@@ -12,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from database import init_db
 from scheduler import start_scheduler, stop_scheduler
+from utils.timezone import now_beijing
 
 
 logging.basicConfig(level=logging.INFO)
@@ -139,5 +139,5 @@ def health_check() -> dict[str, object]:
         "environment": settings.ENVIRONMENT,
         "version": settings.VERSION,
         "project_name": settings.PROJECT_NAME,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": now_beijing().isoformat(),
     }

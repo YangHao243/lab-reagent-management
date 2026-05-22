@@ -19,6 +19,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState, type Key } from "react";
 import { apiClient } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { formatBeijingTime } from "../utils/time";
 
 type OperationType = "in" | "out" | "adjust";
 
@@ -26,6 +27,7 @@ type InventoryRecord = {
   id: number;
   year_display_id?: number;
   reagent_id: number;
+  reagent_name?: string | null;
   operation_type: OperationType;
   quantity_change: number;
   before_quantity: number;
@@ -92,6 +94,19 @@ type BatchDeleteResponse = {
   affected_reagent_ids: number[];
 };
 
+type ClearAllResponse = {
+  success: boolean;
+  deleted_count: number;
+  affected_reagent_count: number;
+  message: string;
+};
+
+type ClearAllValues = {
+  username: string;
+  password: string;
+  confirm_text: string;
+};
+
 const operationMeta: Record<OperationType, { color: string; label: string }> = {
   in: { color: "green", label: "入库" },
   out: { color: "red", label: "出库" },
@@ -143,6 +158,7 @@ function getQuantityColor(value: number) {
 
 export default function InventoryRecords() {
   const [form] = Form.useForm<InventoryOperationValues>();
+  const [clearForm] = Form.useForm<ClearAllValues>();
   const watchedReason = Form.useWatch("reason", form);
   const currentYearMonth = getCurrentYearMonth();
   const [year, setYear] = useState<number>(() => new Date().getFullYear());
@@ -160,7 +176,7 @@ export default function InventoryRecords() {
   const [calendarData, setCalendarData] = useState<InventoryCalendarResponse | null>(null);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null);
-  const { hasRole } = useAuth();
+  const { hasRole, user } = useAuth();
   const canEditRecord = hasRole("superadmin");
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<InventoryRecord | null>(null);
@@ -168,6 +184,8 @@ export default function InventoryRecords() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [selectedRecordIds, setSelectedRecordIds] = useState<number[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [clearingRecords, setClearingRecords] = useState(false);
 
   // 加载出入库记录，筛选条件直接传给后端，避免前端重复过滤。
   const loadRecords = (nextType?: OperationType, nextYear = year) => {
@@ -320,13 +338,43 @@ export default function InventoryRecords() {
     }
   };
 
+  // 清空全部库存流水。该操作极高危，后端会再次校验超级管理员用户名和密码。
+  const clearAllRecords = async () => {
+    const values = await clearForm.validateFields();
+    setClearingRecords(true);
+    try {
+      const response = await apiClient.post<ClearAllResponse>(
+        "/inventory/records/clear-all",
+        values,
+      );
+      message.success(response.data.message || "已清空所有库存流水记录");
+      setSelectedRecordIds([]);
+      setClearModalOpen(false);
+      clearForm.resetFields();
+      loadRecords(operationType);
+      loadReagents();
+      refreshRelatedData();
+      loadCalendar();
+    } catch (error) {
+      message.error(getApiError(error, "清空库存流水失败"));
+    } finally {
+      setClearingRecords(false);
+    }
+  };
+
   const columns: ColumnsType<InventoryRecord> = [
-    { title: "记录ID", dataIndex: "year_display_id", width: 90 },
-    { title: "试剂ID", dataIndex: "reagent_id", width: 90 },
+    { title: "记录ID", dataIndex: "year_display_id", width: 80 },
+    {
+      title: "试剂名称",
+      dataIndex: "reagent_name",
+      width: 190,
+      ellipsis: true,
+      render: (value: string | null | undefined, record) => value || `#${record.reagent_id}`,
+    },
     {
       title: "操作类型",
       dataIndex: "operation_type",
-      width: 110,
+      width: 90,
       render: (value: OperationType) => (
         <Tag color={operationMeta[value]?.color || "default"}>
           {operationMeta[value]?.label || value}
@@ -336,28 +384,38 @@ export default function InventoryRecords() {
     {
       title: "变化数量",
       dataIndex: "quantity_change",
-      width: 110,
+      width: 100,
       render: (value: number, record) => (
         <span style={{ color: getQuantityColor(value) }}>
           {value}
         </span>
       ),
     },
-    { title: "操作前数量", dataIndex: "before_quantity", width: 120 },
-    { title: "操作后数量", dataIndex: "after_quantity", width: 120 },
+    { title: "操作前数量", dataIndex: "before_quantity", width: 110 },
+    { title: "操作后数量", dataIndex: "after_quantity", width: 110 },
     {
       title: "操作员",
       dataIndex: "operator_name",
-      width: 100,
+      width: 110,
       render: (value: string | undefined) => value || "-",
     },
-    { title: "原因", dataIndex: "reason", ellipsis: true },
-    { title: "备注", dataIndex: "remark", ellipsis: true },
+    { title: "原因", dataIndex: "reason", width: 120, ellipsis: true },
     {
       title: "时间",
       dataIndex: "created_at",
       width: 180,
-      render: (value: string) => new Date(value).toLocaleString(),
+      render: (value: string) => formatBeijingTime(value),
+    },
+    {
+      title: "备注",
+      dataIndex: "remark",
+      width: 260,
+      ellipsis: true,
+      render: (value: string | undefined) => (
+        <Typography.Text title={value || ""} ellipsis style={{ maxWidth: 240 }}>
+          {value || "-"}
+        </Typography.Text>
+      ),
     },
     ...(canEditRecord
       ? [
@@ -417,7 +475,7 @@ export default function InventoryRecords() {
       title: "时间",
       dataIndex: "created_at",
       width: 180,
-      render: (value: string) => new Date(value).toLocaleString(),
+      render: (value: string) => formatBeijingTime(value),
     },
   ];
 
@@ -488,24 +546,40 @@ export default function InventoryRecords() {
                     ]}
                   />
                   {canEditRecord && (
-                    <Popconfirm
-                      title={`确认删除选中的 ${selectedRecordIds.length} 条库存流水记录？`}
-                      description="删除后将重新计算相关试剂库存及流水前后数量。此操作仅超级管理员可执行。是否继续？"
-                      okText="确认删除"
-                      cancelText="取消"
-                      disabled={selectedRecordIds.length === 0 || batchDeleting}
-                      onConfirm={batchDeleteRecords}
-                    >
+                    <>
+                      <Popconfirm
+                        title={`确认删除选中的 ${selectedRecordIds.length} 条库存流水记录？`}
+                        description="删除后将重新计算相关试剂库存及流水前后数量。此操作仅超级管理员可执行。是否继续？"
+                        okText="确认删除"
+                        cancelText="取消"
+                        disabled={selectedRecordIds.length === 0 || batchDeleting}
+                        onConfirm={batchDeleteRecords}
+                      >
+                        <Button
+                          danger
+                          disabled={selectedRecordIds.length === 0}
+                          loading={batchDeleting}
+                        >
+                          {selectedRecordIds.length > 0
+                            ? `批量删除（${selectedRecordIds.length}）`
+                            : "批量删除"}
+                        </Button>
+                      </Popconfirm>
                       <Button
                         danger
-                        disabled={selectedRecordIds.length === 0}
-                        loading={batchDeleting}
+                        type="primary"
+                        onClick={() => {
+                          clearForm.setFieldsValue({
+                            username: user?.username || "",
+                            password: "",
+                            confirm_text: "",
+                          });
+                          setClearModalOpen(true);
+                        }}
                       >
-                        {selectedRecordIds.length > 0
-                          ? `批量删除（${selectedRecordIds.length}）`
-                          : "批量删除"}
+                        清空记录
                       </Button>
-                    </Popconfirm>
+                    </>
                   )}
                 </Space>
                 <Table
@@ -525,7 +599,7 @@ export default function InventoryRecords() {
                   }
                   pagination={{ pageSize: 12, onChange: () => setSelectedRecordIds([]) }}
                   columns={columns}
-                  scroll={{ x: 1240 }}
+                  scroll={{ x: 1380 }}
                 />
               </Card>
             ),
@@ -859,6 +933,59 @@ export default function InventoryRecords() {
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="严重警告：确认清空所有出入库记录？"
+        open={clearModalOpen}
+        okText="确认清空"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        confirmLoading={clearingRecords}
+        onOk={clearAllRecords}
+        onCancel={() => {
+          setClearModalOpen(false);
+          clearForm.resetFields();
+        }}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Typography.Text type="danger" strong>
+            此操作将删除数据库中的所有库存流水/出入库记录，并将所有试剂当前库存重置为 0。
+            该操作不可逆，仅允许超级管理员执行。请确认你已经完成数据备份。
+          </Typography.Text>
+          <Form form={clearForm} layout="vertical" preserve={false}>
+            <Form.Item
+              label="超级管理员用户名"
+              name="username"
+              rules={[{ required: true, message: "请输入当前超级管理员用户名" }]}
+            >
+              <Input autoComplete="username" />
+            </Form.Item>
+            <Form.Item
+              label="超级管理员密码"
+              name="password"
+              rules={[{ required: true, message: "请输入当前超级管理员密码" }]}
+            >
+              <Input.Password autoComplete="current-password" />
+            </Form.Item>
+            <Form.Item
+              label="确认文本"
+              name="confirm_text"
+              rules={[
+                { required: true, message: "请输入 CLEAR 以确认清空" },
+                {
+                  validator(_, value) {
+                    if (value === "CLEAR") return Promise.resolve();
+                    return Promise.reject(new Error("确认文本必须为 CLEAR"));
+                  },
+                },
+              ]}
+            >
+              <Input placeholder="请输入 CLEAR" />
+            </Form.Item>
+          </Form>
+        </Space>
       </Modal>
 
       <Modal

@@ -8,10 +8,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import Field
-from sqlalchemy import select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from auth import verify_password
 from audit_logs import create_audit_log
 from alerts import ensure_low_stock_alert
 from database import get_db
@@ -20,12 +21,16 @@ from models import InventoryRecord, Reagent, User
 from schemas import (
     InventoryBatchDeleteRequest,
     InventoryBatchDeleteResponse,
+    InventoryClearAllRequest,
+    InventoryClearAllResponse,
     InventoryEditRequest,
     InventoryOperationRequest,
     InventoryOperationResponse,
     InventoryRecordResponse,
     ReagentStockResponse,
 )
+from utils.timezone import today_beijing
+from utils.timezone import now_beijing
 
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -428,11 +433,11 @@ def list_inventory_records(
             detail="开始日期不能晚于结束日期",
         )
 
-    filter_year = year or date.today().year
+    filter_year = year or today_beijing().year
     year_start = datetime(filter_year, 1, 1)
     year_end = datetime(filter_year + 1, 1, 1)
 
-    stmt = select(InventoryRecord).where(
+    stmt = select(InventoryRecord).options(joinedload(InventoryRecord.reagent)).where(
         InventoryRecord.created_at >= year_start,
         InventoryRecord.created_at < year_end,
     )
@@ -465,6 +470,11 @@ def list_inventory_records(
     for index, record in enumerate(year_records, start=1):
         data: dict[str, object] = InventoryRecordResponse.model_validate(record).model_dump()
         data["year_display_id"] = index
+        data["reagent_name"] = (
+            record.reagent.name_cn
+            if record.reagent and record.reagent.name_cn
+            else f"#{record.reagent_id}"
+        )
         indexed.append(data)
 
     indexed.reverse()
@@ -480,7 +490,7 @@ def get_inventory_record(
     record_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> InventoryRecord:
+) -> dict[str, object]:
     """按 ID 查询单条库存流水。"""
 
     _ = current_user
@@ -490,7 +500,13 @@ def get_inventory_record(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="库存记录不存在",
         )
-    return record
+    data: dict[str, object] = InventoryRecordResponse.model_validate(record).model_dump()
+    data["reagent_name"] = (
+        record.reagent.name_cn
+        if record.reagent and record.reagent.name_cn
+        else f"#{record.reagent_id}"
+    )
+    return data
 
 
 @router.post(
@@ -519,6 +535,81 @@ def batch_delete_inventory_records(
             detail="批量删除库存流水失败",
         ) from exc
     return result
+
+
+@router.post(
+    "/records/clear-all",
+    response_model=InventoryClearAllResponse,
+    summary="清空全部库存流水（仅超级管理员，需二次验证）",
+)
+def clear_all_inventory_records(
+    payload: InventoryClearAllRequest,
+    current_user: User = Depends(require_roles("superadmin")),
+    db: Session = Depends(get_db),
+) -> InventoryClearAllResponse:
+    """清空全部库存流水，并将所有试剂当前库存重置为 0。
+
+    该操作极高危：除登录态外，还必须再次校验当前超级管理员用户名和密码。
+    """
+
+    confirm_text = payload.confirm_text.strip() if payload.confirm_text else None
+    if confirm_text is not None and confirm_text not in {"CLEAR", "清空记录"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="确认文本不正确，请输入 CLEAR",
+        )
+
+    verification_user = db.execute(
+        select(User).where(User.username == payload.username.strip())
+    ).scalar_one_or_none()
+    if (
+        verification_user is None
+        or verification_user.id != current_user.id
+        or verification_user.role != "superadmin"
+        or not verification_user.is_active
+        or not verify_password(payload.password, verification_user.password_hash)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="超级管理员二次验证失败",
+        )
+
+    try:
+        deleted_count = db.execute(select(func.count(InventoryRecord.id))).scalar_one()
+        affected_reagent_count = db.execute(select(func.count(Reagent.id))).scalar_one()
+
+        db.execute(delete(InventoryRecord))
+        db.execute(
+            update(Reagent).values(
+                current_quantity=0.0,
+                updated_at=now_beijing(),
+            )
+        )
+        create_audit_log(
+            db=db,
+            user_id=current_user.id,
+            action="clear_inventory_records",
+            target_type="inventory_records",
+            target_id=None,
+            detail=(
+                f"清空全部库存流水；删除记录数：{deleted_count}；"
+                f"重置试剂库存数：{affected_reagent_count}；操作用户：{current_user.username}"
+            ),
+        )
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="清空库存流水失败",
+        ) from exc
+
+    return InventoryClearAllResponse(
+        success=True,
+        deleted_count=deleted_count,
+        affected_reagent_count=affected_reagent_count,
+        message="已清空所有库存流水记录，并重置试剂库存",
+    )
 
 
 def recalculate_reagent_inventory(

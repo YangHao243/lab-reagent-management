@@ -17,6 +17,7 @@ from notifications import (
     send_wechat_work_text,
 )
 from schemas import AlertEventResponse, ReagentResponse
+from utils.timezone import now_beijing, today_beijing
 
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -47,7 +48,7 @@ def get_low_stock_reagents(db: Session) -> list[Reagent]:
 def get_expiring_reagents(db: Session, days: int) -> list[Reagent]:
     """查询即将过期试剂，范围为今天到今天 + days。"""
 
-    today = date.today()
+    today = today_beijing()
     end_date = today + timedelta(days=days)
     stmt = (
         select(Reagent)
@@ -244,7 +245,7 @@ def list_alert_events(
 
     _ = current_user
 
-    filter_year = year or date.today().year
+    filter_year = year or today_beijing().year
     year_start = datetime(filter_year, 1, 1)
     year_end = datetime(filter_year + 1, 1, 1)
 
@@ -297,7 +298,7 @@ def resolve_alert_event(
         )
 
     alert.is_resolved = True
-    alert.resolved_at = datetime.utcnow()
+    alert.resolved_at = now_beijing()
 
     try:
         db.commit()
@@ -340,7 +341,7 @@ def batch_handle_alerts(
             message="当前没有需要处理的报警事件",
         )
 
-    now = datetime.utcnow()
+    now = now_beijing()
     for alert in unresolved_alerts:
         alert.is_resolved = True
         alert.resolved_at = now

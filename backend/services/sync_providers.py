@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -21,6 +21,7 @@ from services.sync_core import (
     SyncImportResult,
     SyncLogService,
 )
+from utils.timezone import now_beijing
 
 
 def get_token_file_path() -> Path:
@@ -278,7 +279,7 @@ class RealTencentDocsProvider(SyncProvider):
         token = self._latest_token()
         token_saved = bool(token and token.access_token)
         token_expires_at = token.expires_at if token else None
-        token_valid = bool(token_saved and token_expires_at and token_expires_at > datetime.utcnow())
+        token_valid = bool(token_saved and token_expires_at and token_expires_at > now_beijing())
         open_id_saved = bool(token and token.open_id)
         ready_for_oauth = all(
             [config["client_id"], config["client_secret"], config["redirect_uri"]]

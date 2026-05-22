@@ -11,6 +11,7 @@ from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+from utils.timezone import now_beijing
 
 
 class User(Base):
@@ -27,12 +28,12 @@ class User(Base):
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     wechat_openid: Mapped[str | None] = mapped_column(String(128), unique=True, index=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, index=True, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_beijing)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=now_beijing,
+        onupdate=now_beijing,
     )
 
 
@@ -62,12 +63,12 @@ class Reagent(Base):
     expiry_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)
     msds_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_beijing)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=now_beijing,
+        onupdate=now_beijing,
     )
 
     # 与库存流水表建立一对多关系。
@@ -99,12 +100,12 @@ class InventoryRecord(Base):
     source_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_col: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=now_beijing)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=now_beijing,
+        onupdate=now_beijing,
     )
 
     # 与试剂表建立多对一关系。
@@ -126,7 +127,7 @@ class AlertEvent(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     is_resolved: Mapped[bool] = mapped_column(Boolean, index=True, nullable=False, default=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=now_beijing)
 
 
 class SyncLog(Base):
@@ -141,7 +142,7 @@ class SyncLog(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 同步明细 JSON 字符串，保存导入统计和错误摘要，避免第一阶段新增复杂表结构。
     detail_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=now_beijing)
 
 
 class TencentDocsToken(Base):
@@ -160,12 +161,12 @@ class TencentDocsToken(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, index=True, nullable=True)
     open_id: Mapped[str | None] = mapped_column(String(128), index=True, nullable=True)
     scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_beijing)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=now_beijing,
+        onupdate=now_beijing,
     )
 
 
@@ -180,4 +181,4 @@ class AuditLog(Base):
     target_type: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
     target_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=now_beijing)

@@ -24,6 +24,7 @@ from models import (
     SyncLog,
     User,
 )
+from utils.timezone import now_beijing
 
 EXPORT_DIR = Path(__file__).resolve().parent / "exports"
 DEFAULT_SQLITE_PATH = Path(__file__).resolve().parent / "lab_reagent.db"
@@ -65,7 +66,7 @@ def export() -> None:
     db = SessionLocal()
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_beijing().strftime("%Y%m%d_%H%M%S")
     output_path = EXPORT_DIR / f"sqlite_export_{timestamp}.json"
 
     export_data: dict[str, list[dict]] = {}

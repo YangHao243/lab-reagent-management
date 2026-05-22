@@ -25,12 +25,15 @@ from sqlalchemy.orm import Session
 from database import engine
 from models import InventoryRecord, Reagent
 from services.sync_core import ImportService, NormalizedInventoryRecord, SyncImportResult
+from utils.timezone import now_beijing
 
 
 SHEET_NAME_PATTERN = re.compile(r"^\s*(\d{4})[._-](\d{1,2})\s*$")
 OPERATION_MAPPING = {
     "入库": "in",
     "领取": "out",
+    "出库": "out",
+    "领用": "out",
 }
 OPERATION_LABELS = {
     "in": "入库",
@@ -175,7 +178,7 @@ def clean_text(value: Any) -> str | None:
 
 
 def clean_quantity(value: Any) -> float:
-    """解析数量，要求为正数。"""
+    """解析数量，允许来源数据带正负号，但不能为 0。"""
 
     if is_blank(value):
         raise ValueError("数量不能为空")
@@ -185,8 +188,8 @@ def clean_quantity(value: Any) -> float:
     except (TypeError, ValueError) as exc:
         raise ValueError("数量必须是数字") from exc
 
-    if quantity <= 0:
-        raise ValueError("数量必须大于 0")
+    if quantity == 0:
+        raise ValueError("数量不能为 0")
     return quantity
 
 
@@ -525,7 +528,7 @@ def import_excel_inventory(
                         sheet_name,
                         excel_row,
                         reagent_name,
-                        "操作必须为入库或领取",
+                        "操作必须为入库、领取或出库",
                     )
                     continue
 
@@ -773,7 +776,7 @@ def export_inventory_excel(db: Session, year: int) -> Path:
 
     export_dir = Path(__file__).resolve().parent.parent / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_beijing().strftime("%Y%m%d_%H%M%S")
     file_path = export_dir / f"excel_inventory_{year}_{timestamp}.xlsx"
     workbook.save(file_path)
     return file_path

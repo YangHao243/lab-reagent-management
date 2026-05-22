@@ -24,6 +24,8 @@ BACKEND_DIR = Path(__file__).resolve().parent
 BACKUP_DIR = BACKEND_DIR / "backups"
 sys.path.insert(0, str(BACKEND_DIR))
 
+from utils.timezone import now_beijing  # noqa: E402
+
 BACKUP_TABLES = [
     ("users", "User"),
     ("reagents", "Reagent"),
@@ -86,7 +88,7 @@ def backup(dry_run: bool = False) -> None:
             print("\n[Dry-run 完成] 未写入文件")
             return
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = now_beijing().strftime("%Y%m%d_%H%M%S")
         output_path = BACKUP_DIR / f"pg_backup_{timestamp}.json"
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(export_data, f, ensure_ascii=False, indent=2)

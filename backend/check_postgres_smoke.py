@@ -34,6 +34,8 @@ from sqlalchemy.exc import SQLAlchemyError
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+from utils.timezone import now_beijing, today_beijing  # noqa: E402
+
 
 def check_db_connection(db: Any) -> bool:
     """验证数据库连接。"""
@@ -135,9 +137,7 @@ def check_report_query(db: Any) -> bool:
     from models import InventoryRecord, Reagent
 
     # 消耗 Top N 查询
-    from datetime import date
-
-    today = date.today()
+    today = today_beijing()
     start_at = datetime(today.year, 1, 1)
     end_at = datetime(today.year + 1, 1, 1)
 
@@ -174,9 +174,9 @@ def write_test_record(db: Any) -> None:
         reagent_id=reagent.id,
         alert_type="冒烟测试",
         level="info",
-        message=f"冒烟测试记录 {datetime.utcnow().isoformat()}",
+        message=f"冒烟测试记录 {now_beijing().isoformat()}",
         is_resolved=True,
-        resolved_at=datetime.utcnow(),
+        resolved_at=now_beijing(),
     )
     try:
         db.add(test_alert)

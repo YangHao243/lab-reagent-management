@@ -11,7 +11,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
-from typing import Any, Literal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,7 +19,11 @@ from sqlalchemy.orm import Session
 from models import InventoryRecord, Reagent, SyncLog
 
 
-OperationType = Literal["in", "out"]
+OperationType = str
+
+IN_OPERATION_TYPES = {"in", "stock_in", "入库", "领料入库", "采购入库"}
+OUT_OPERATION_TYPES = {"out", "stock_out", "出库", "领取", "领用", "消耗", "实验领用", "领料"}
+ADJUST_OPERATION_TYPES = {"adjust", "adjustment", "stock_adjust", "校正", "调整", "库存校正"}
 
 
 @dataclass
@@ -173,6 +177,10 @@ def parse_reagent_name(raw_name: str) -> tuple[str, str | None, str | None]:
 def build_source_hash(record: NormalizedInventoryRecord) -> str:
     """生成标准去重哈希。"""
 
+    operation_type = normalize_operation_type(record.operation_type or record.operation_text)
+    operator_name = normalize_operator_name(record.operator)
+    operation_time = normalize_operation_time(record)
+    quantity_change = get_signed_quantity(operation_type, record.quantity)
     raw = "|".join(
         [
             record.source,
@@ -180,23 +188,76 @@ def build_source_hash(record: NormalizedInventoryRecord) -> str:
             str(record.source_row or ""),
             str(record.source_col or ""),
             record.reagent_name.strip(),
-            record.operation_type,
-            f"{record.quantity:g}",
-            (record.operator or "-").strip() or "-",
-            (record.operation_time or datetime.combine(record.event_date, time.min)).isoformat(),
+            operation_type,
+            f"{quantity_change:g}",
+            operator_name,
+            operation_time.isoformat(),
         ]
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def normalize_operation_type(operation_type: str | None) -> str:
+    """统一同步导入操作类型。"""
+
+    value = (operation_type or "").strip()
+    lowered = value.lower()
+    if lowered in IN_OPERATION_TYPES or value in IN_OPERATION_TYPES:
+        return "in"
+    if lowered in OUT_OPERATION_TYPES or value in OUT_OPERATION_TYPES:
+        return "out"
+    if lowered in ADJUST_OPERATION_TYPES or value in ADJUST_OPERATION_TYPES:
+        return "adjust"
+    return lowered or value
+
+
+def normalize_operator_name(operator: str | None) -> str:
+    """统一操作人名称，空值使用 '-'。"""
+
+    return (operator or "-").strip() or "-"
+
+
+def normalize_operation_time(record: NormalizedInventoryRecord) -> datetime:
+    """统一导入业务时间，精确到秒，去掉微秒。"""
+
+    operation_time = record.operation_time or datetime.combine(record.event_date, time(hour=10))
+    return operation_time.replace(microsecond=0)
+
+
 def get_signed_quantity(operation_type: str, quantity: float) -> float:
     """把库存变化量统一成系统内部正负号规则。"""
 
-    if operation_type == "in":
+    normalized_type = normalize_operation_type(operation_type)
+    if normalized_type == "in":
         return abs(float(quantity))
-    if operation_type == "out":
+    if normalized_type == "out":
         return -abs(float(quantity))
     return float(quantity)
+
+
+def find_duplicate_inventory_record(
+    db: Session,
+    reagent_id: int,
+    operation_type: str,
+    operator_name: str,
+    quantity_change: float,
+    operation_time: datetime,
+) -> int | None:
+    """按业务唯一键查找重复库存流水。
+
+    唯一键为：试剂、操作类型、操作员、带符号变化数量、业务时间。
+    不包含 reason/remark/source，避免不同导入来源或备注位置变化导致重复导入。
+    """
+
+    return db.execute(
+        select(InventoryRecord.id)
+        .where(InventoryRecord.reagent_id == reagent_id)
+        .where(InventoryRecord.operation_type == operation_type)
+        .where(InventoryRecord.operator_name == operator_name)
+        .where(InventoryRecord.quantity_change == quantity_change)
+        .where(InventoryRecord.created_at == operation_time)
+        .limit(1)
+    ).scalar_one_or_none()
 
 
 def recompute_reagent_inventory(db: Session, reagent_id: int) -> None:
@@ -267,7 +328,8 @@ class ImportService:
         if not record.reagent_name.strip():
             result.add_error(record.source_sheet, record.source_row, None, "试剂名称不能为空")
             return None
-        if record.operation_type not in {"in", "out"}:
+        operation_type = normalize_operation_type(record.operation_type or record.operation_text)
+        if operation_type not in {"in", "out"}:
             result.add_error(
                 record.source_sheet,
                 record.source_row,
@@ -275,17 +337,18 @@ class ImportService:
                 "操作类型必须为 in 或 out",
             )
             return None
-        if record.quantity <= 0:
+        quantity_change = get_signed_quantity(operation_type, record.quantity)
+        if quantity_change == 0:
             result.add_error(
                 record.source_sheet,
                 record.source_row,
                 record.reagent_name,
-                "数量必须大于 0",
+                "数量不能为 0",
             )
             return None
 
-        operator_name = (record.operator or "-").strip() or "-"
-        operation_time = record.operation_time or datetime.combine(record.event_date, time(hour=10))
+        operator_name = normalize_operator_name(record.operator)
+        operation_time = normalize_operation_time(record)
 
         source_hash = record.source_hash or build_source_hash(record)
         if source_hash in seen_hashes:
@@ -302,18 +365,16 @@ class ImportService:
 
         reagent = self._find_or_create_reagent(record.reagent_name, result)
         before_quantity = reagent.current_quantity
-        quantity_change = get_signed_quantity(record.operation_type, record.quantity)
-        reason = "领料入库" if record.operation_type == "in" else "实验领用"
+        reason = "领料入库" if operation_type == "in" else "实验领用"
 
-        duplicate_record = self.db.execute(
-            select(InventoryRecord.id)
-            .where(InventoryRecord.reagent_id == reagent.id)
-            .where(InventoryRecord.operation_type == record.operation_type)
-            .where(InventoryRecord.quantity_change == quantity_change)
-            .where(InventoryRecord.operator_name == operator_name)
-            .where(InventoryRecord.reason == reason)
-            .where(InventoryRecord.created_at == operation_time)
-        ).scalar_one_or_none()
+        duplicate_record = find_duplicate_inventory_record(
+            db=self.db,
+            reagent_id=reagent.id,
+            operation_type=operation_type,
+            operator_name=operator_name,
+            quantity_change=quantity_change,
+            operation_time=operation_time,
+        )
         if duplicate_record is not None:
             seen_hashes.add(source_hash)
             result.skipped += 1
@@ -324,7 +385,7 @@ class ImportService:
         reagent.current_quantity = after_quantity
         inventory_record = InventoryRecord(
             reagent_id=reagent.id,
-            operation_type=record.operation_type,
+            operation_type=operation_type,
             quantity_change=quantity_change,
             before_quantity=before_quantity,
             after_quantity=after_quantity,

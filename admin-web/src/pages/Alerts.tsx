@@ -2,6 +2,7 @@ import { Button, Card, Modal, Select, Space, Table, Tag, Typography, message } f
 import { useEffect, useState } from "react";
 import { apiClient } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { formatBeijingTime } from "../utils/time";
 
 type AlertEvent = {
   id: number;
@@ -132,7 +133,7 @@ export default function Alerts() {
             {
               title: "创建时间",
               dataIndex: "created_at",
-              render: (value: string) => new Date(value).toLocaleString(),
+              render: (value: string) => formatBeijingTime(value),
             },
             {
               title: "操作",

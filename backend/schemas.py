@@ -126,12 +126,30 @@ class InventoryBatchDeleteResponse(BaseModel):
     affected_reagent_ids: list[int] = Field(..., description="受影响并已重新计算库存的试剂 ID")
 
 
+class InventoryClearAllRequest(BaseModel):
+    """清空全部库存流水的二次验证请求。"""
+
+    username: str = Field(..., min_length=1, description="当前超级管理员用户名")
+    password: str = Field(..., min_length=1, description="当前超级管理员密码")
+    confirm_text: str | None = Field(default=None, description="可选确认文本：CLEAR 或 清空记录")
+
+
+class InventoryClearAllResponse(BaseModel):
+    """清空全部库存流水响应。"""
+
+    success: bool = Field(default=True, description="是否清空成功")
+    deleted_count: int = Field(..., description="已删除的库存流水记录数量")
+    affected_reagent_count: int = Field(..., description="已重置库存的试剂数量")
+    message: str = Field(..., description="操作结果说明")
+
+
 class InventoryRecordResponse(ORMResponseModel):
     """库存变动记录响应数据。"""
 
     id: int = Field(..., description="库存记录 ID")
     year_display_id: int | None = Field(default=None, description="年度显示编号，每年从 1 开始")
     reagent_id: int = Field(..., description="试剂 ID")
+    reagent_name: str | None = Field(default=None, description="试剂中文名称")
     operation_type: str = Field(..., description="操作类型：in / out / adjust")
     quantity_change: float = Field(..., description="库存变化数量")
     before_quantity: float = Field(..., description="操作前库存数量")

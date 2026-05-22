@@ -23,6 +23,7 @@ from database import Base, SessionLocal, engine  # noqa: E402
 import models  # noqa: E402,F401
 from main import app  # noqa: E402
 from models import InventoryRecord, Reagent, User  # noqa: E402
+from utils.timezone import BEIJING_TZ, now_beijing  # noqa: E402
 
 
 @pytest.fixture()
@@ -260,11 +261,22 @@ def test_reagent_inventory_and_alert_flow(client: TestClient) -> None:
     records = records_response.json()
     assert len(records) == 2
     assert {record["operation_type"] for record in records} == {"in", "out"}
+    assert all(record["reagent_name"] == reagent_payload["name_cn"] for record in records)
 
     low_stock_response = client.get("/alerts/low-stock", headers=headers)
     assert low_stock_response.status_code == 200
     low_stock_reagents = low_stock_response.json()
     assert any(item["id"] == reagent_id for item in low_stock_reagents)
+
+
+def test_now_beijing_returns_naive_beijing_time() -> None:
+    """系统统一时间工具应返回 naive 北京时间，适配当前 DateTime 字段。"""
+
+    current = now_beijing()
+    expected = datetime.now(BEIJING_TZ).replace(tzinfo=None)
+
+    assert current.tzinfo is None
+    assert abs((expected - current).total_seconds()) < 2
 
 
 def test_auth_required_and_role_forbidden(client: TestClient) -> None:
@@ -607,6 +619,106 @@ def test_batch_delete_empty_record_ids_returns_400(client: TestClient) -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_clear_all_inventory_records_with_superadmin_second_verification(
+    client: TestClient,
+) -> None:
+    """超级管理员二次验证通过后，应清空全部库存流水并重置试剂库存。"""
+
+    headers = auth_headers(client)
+    reagent_a = create_test_reagent(client, headers, "清空记录试剂A")
+    reagent_b = create_test_reagent(client, headers, "清空记录试剂B")
+    stock_in(client, headers, reagent_a, 100)
+    stock_out(client, headers, reagent_a, 20)
+    stock_in(client, headers, reagent_b, 50)
+
+    response = client.post(
+        "/inventory/records/clear-all",
+        json={
+            "username": "superadmin",
+            "password": "Admin@123456",
+            "confirm_text": "CLEAR",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["deleted_count"] == 3
+    assert data["affected_reagent_count"] >= 2
+    assert get_stock(client, headers, reagent_a) == 0
+    assert get_stock(client, headers, reagent_b) == 0
+
+    records_response = client.get("/inventory/records", headers=headers)
+    assert records_response.status_code == 200
+    assert records_response.json() == []
+
+
+def test_clear_all_inventory_records_rejects_wrong_password(
+    client: TestClient,
+) -> None:
+    """超级管理员二次验证密码错误时，库存流水和库存都不应变化。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "清空记录密码错误")
+    stock_in(client, headers, reagent_id, 100)
+
+    response = client.post(
+        "/inventory/records/clear-all",
+        json={
+            "username": "superadmin",
+            "password": "WrongPassword",
+            "confirm_text": "CLEAR",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "超级管理员二次验证失败"
+    assert get_stock(client, headers, reagent_id) == 100
+    assert len(get_inventory_records_for_reagent(reagent_id)) == 1
+
+
+def test_clear_all_inventory_records_forbidden_for_member(client: TestClient) -> None:
+    """非超级管理员不能清空全部库存流水。"""
+
+    headers = auth_headers(client)
+    reagent_id = create_test_reagent(client, headers, "成员禁止清空记录")
+    stock_in(client, headers, reagent_id, 100)
+
+    create_member_response = client.post(
+        "/users/register",
+        json={
+            "username": "clear-member",
+            "password": "Member@123456",
+            "full_name": "普通成员",
+            "role": "member",
+            "is_active": True,
+        },
+        headers=headers,
+    )
+    assert create_member_response.status_code == 201
+    member_login_response = client.post(
+        "/users/login",
+        json={"username": "clear-member", "password": "Member@123456"},
+    )
+    assert member_login_response.status_code == 200
+
+    response = client.post(
+        "/inventory/records/clear-all",
+        json={
+            "username": "clear-member",
+            "password": "Member@123456",
+            "confirm_text": "CLEAR",
+        },
+        headers={"Authorization": f"Bearer {member_login_response.json()['access_token']}"},
+    )
+
+    assert response.status_code == 403
+    assert get_stock(client, headers, reagent_id) == 100
+    assert len(get_inventory_records_for_reagent(reagent_id)) == 1
 
 
 def test_delete_out_between_in_records_recomputes_stock(client: TestClient) -> None:

@@ -42,6 +42,7 @@ from sync_api import (
     run_mock_export,
     run_mock_import,
 )
+from utils.timezone import now_beijing
 
 
 router = APIRouter(prefix="/tencent-docs", tags=["tencent-docs"])
@@ -237,7 +238,7 @@ def save_token_data(token_data: dict[str, Any]) -> None:
     第一阶段先用文件保存，后续可以独立迁移为数据库表。
     """
 
-    token_data["saved_at"] = datetime.utcnow().isoformat()
+    token_data["saved_at"] = now_beijing().isoformat()
     token_file = get_token_file_path()
     token_file.parent.mkdir(parents=True, exist_ok=True)
     token_file.write_text(

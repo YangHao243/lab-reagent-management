@@ -15,6 +15,7 @@ import type { UploadProps } from "antd";
 import { useEffect, useState } from "react";
 import { apiClient } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { formatBeijingTime } from "../utils/time";
 
 type SyncStatus = {
   has_client_id: boolean;
@@ -313,7 +314,7 @@ export default function TencentDocsSync() {
           <Descriptions.Item label="doc_id">{realStatus?.doc_id_configured ? realStatus.doc_id : "未配置"}</Descriptions.Item>
           <Descriptions.Item label="token">{renderSaved(realStatus?.token_saved)}</Descriptions.Item>
           <Descriptions.Item label="token 状态">{tokenStatusText}</Descriptions.Item>
-          <Descriptions.Item label="token 过期时间">{realStatus?.token_expires_at ?? "-"}</Descriptions.Item>
+          <Descriptions.Item label="token 过期时间">{formatBeijingTime(realStatus?.token_expires_at)}</Descriptions.Item>
           <Descriptions.Item label="open_id">{realStatus?.open_id_saved ? "已获取" : "未获取"}</Descriptions.Item>
           <Descriptions.Item label="OAuth 条件">{realStatus?.ready_for_oauth ? "已满足" : "缺少配置"}</Descriptions.Item>
           <Descriptions.Item label="同步条件">{realStatus?.ready_for_sync ? "已满足" : "未授权或 token 无效"}</Descriptions.Item>
@@ -392,7 +393,7 @@ export default function TencentDocsSync() {
             {
               title: "时间",
               dataIndex: "created_at",
-              render: (value: string) => new Date(value).toLocaleString(),
+              render: (value: string) => formatBeijingTime(value),
             },
           ]}
         />

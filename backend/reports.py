@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user
 from models import InventoryRecord, Reagent, User
+from utils.timezone import now_beijing, today_beijing
 
 
 router = APIRouter(
@@ -344,7 +345,7 @@ def validate_date_range(start_date: Date, end_date: Date) -> None:
 def get_summary(db: Session = Depends(get_db)) -> ReportSummary:
     """返回试剂总数、低库存数量以及今日/本月出入库次数。"""
 
-    today = Date.today()
+    today = today_beijing()
     today_start, today_end = day_range(today)
     month_start, month_end = month_range(today.year, today.month)
 
@@ -383,7 +384,7 @@ def get_daily_report(
 ) -> DailyReport:
     """返回指定日期的入库、出库、校正次数和数量。"""
 
-    report_date = target_date or Date.today()
+    report_date = target_date or today_beijing()
     start_at, end_at = day_range(report_date)
     records = get_records_in_range(db, start_at, end_at)
     stats = summarize_inventory_records(records)
@@ -409,7 +410,7 @@ def get_weekly_report(
 ) -> list[MovementStats]:
     """返回连续 7 天内每天的入库/出库/校正统计。"""
 
-    first_day = start_date or (Date.today() - timedelta(days=6))
+    first_day = start_date or (today_beijing() - timedelta(days=6))
     results: list[MovementStats] = []
 
     for offset in range(7):
@@ -505,7 +506,7 @@ def get_inventory_timeseries(
     yearly：返回以指定年份为结束点的连续年份数据。没有记录的时间点补 0。
     """
 
-    today = Date.today()
+    today = today_beijing()
     report_year = year or today.year
     series: list[TimeSeriesPoint] = []
 
@@ -786,7 +787,7 @@ def export_inventory_records(
     export_dir = Path(__file__).resolve().parent / "exports"
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_beijing().strftime("%Y%m%d_%H%M%S")
     file_path = export_dir / f"inventory_records_{timestamp}.xlsx"
 
     # 使用 pandas 写入 Excel，并显式指定 openpyxl 引擎。

@@ -13,13 +13,13 @@
 from __future__ import annotations
 
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import func, select
 
 from database import SessionLocal, engine, init_db
 from models import InventoryRecord, Reagent
+from utils.timezone import now_beijing
 
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -29,7 +29,7 @@ DB_PATH = BACKEND_DIR / "lab_reagent.db"
 def backup_database() -> Path:
     """备份当前数据库文件。"""
 
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    timestamp = now_beijing().strftime("%Y%m%d%H%M%S")
     backup_path = BACKEND_DIR / f"lab_reagent.db.backup-before-fix-{timestamp}"
     shutil.copy2(DB_PATH, backup_path)
     print(f"数据库已备份到：{backup_path.name}")

@@ -237,6 +237,118 @@ def test_import_excel_duplicate_record_is_skipped() -> None:
         db.close()
 
 
+def test_import_excel_duplicate_out_record_uses_business_key_not_source_row() -> None:
+    """同一业务流水即使来源行不同、领取/出库文案不同，也应跳过重复。"""
+
+    reset_db()
+    db = SessionLocal()
+    first_content = build_excel_content(9, 20, "领取", 20, "张三")
+    second_content = build_excel_content(10, 20, "出库", 20, "张三")
+    try:
+        first_result = import_excel_inventory(db, "first.xlsx", first_content, operator_id=None)
+        db.commit()
+        second_result = import_excel_inventory(db, "second.xlsx", second_content, operator_id=None)
+        db.commit()
+
+        assert first_result.created == 1
+        assert second_result.created == 0
+        assert second_result.skipped == 1
+        records = fetch_inventory_records()
+        assert len(records) == 1
+        assert records[0].created_at == datetime(2026, 5, 20, 10, 0, 0)
+        assert records[0].operation_type == "out"
+        assert records[0].quantity_change == -20
+        assert records[0].operator_name == "张三"
+    finally:
+        db.close()
+
+
+def test_import_excel_blank_operator_normalized_duplicate_is_skipped() -> None:
+    """空操作人统一为 '-' 后，应能识别重复记录。"""
+
+    reset_db()
+    db = SessionLocal()
+    first_content = build_excel_content(9, 20, "领取", 20, None)
+    second_content = build_excel_content(10, 20, "领取", 20, "   ")
+    try:
+        first_result = import_excel_inventory(db, "first.xlsx", first_content, operator_id=None)
+        db.commit()
+        second_result = import_excel_inventory(db, "second.xlsx", second_content, operator_id=None)
+        db.commit()
+
+        assert first_result.created == 1
+        assert second_result.created == 0
+        assert second_result.skipped == 1
+        records = fetch_inventory_records()
+        assert len(records) == 1
+        assert records[0].operator_name == "-"
+    finally:
+        db.close()
+
+
+def test_import_excel_signed_quantity_normalized_duplicate_is_skipped() -> None:
+    """领取数量 20 和 -20 都会归一化为 -20，应识别为同一条。"""
+
+    reset_db()
+    db = SessionLocal()
+    first_content = build_excel_content(9, 20, "领取", 20, "张三")
+    second_content = build_excel_content(10, 20, "领取", -20, "张三")
+    try:
+        first_result = import_excel_inventory(db, "first.xlsx", first_content, operator_id=None)
+        db.commit()
+        second_result = import_excel_inventory(db, "second.xlsx", second_content, operator_id=None)
+        db.commit()
+
+        assert first_result.created == 1
+        assert second_result.created == 0
+        assert second_result.skipped == 1
+        assert len(fetch_inventory_records()) == 1
+    finally:
+        db.close()
+
+
+def test_import_excel_different_date_is_not_duplicate() -> None:
+    """日期不同即使其他字段相同，也应允许新增。"""
+
+    reset_db()
+    db = SessionLocal()
+    first_content = build_excel_content(9, 20, "领取", 20, "张三")
+    second_content = build_excel_content(10, 21, "领取", 20, "张三")
+    try:
+        first_result = import_excel_inventory(db, "first.xlsx", first_content, operator_id=None)
+        db.commit()
+        second_result = import_excel_inventory(db, "second.xlsx", second_content, operator_id=None)
+        db.commit()
+
+        assert first_result.created == 1
+        assert second_result.created == 1
+        assert second_result.skipped == 0
+        assert len(fetch_inventory_records()) == 2
+    finally:
+        db.close()
+
+
+def test_import_excel_different_operator_is_not_duplicate() -> None:
+    """操作员不同即使其他字段相同，也应允许新增。"""
+
+    reset_db()
+    db = SessionLocal()
+    first_content = build_excel_content(9, 20, "领取", 20, "张三")
+    second_content = build_excel_content(10, 20, "领取", 20, "李四")
+    try:
+        first_result = import_excel_inventory(db, "first.xlsx", first_content, operator_id=None)
+        db.commit()
+        second_result = import_excel_inventory(db, "second.xlsx", second_content, operator_id=None)
+        db.commit()
+
+        assert first_result.created == 1
+        assert second_result.created == 1
+        assert second_result.skipped == 0
+        assert len(fetch_inventory_records()) == 2
+    finally:
+        db.close()
+
+
 def test_import_excel_blank_date_with_operation_is_error_not_first_day() -> None:
     """A 列为空但该行有操作时跳过，并进入错误明细。"""
 
