@@ -28,6 +28,7 @@ from services.excel_inventory_sync import (  # noqa: E402
     parse_sheet_year_month,
     row_has_operation,
 )
+from services.sync_core import ImportService, NormalizedInventoryRecord  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 import models  # noqa: E402,F401
 from models import InventoryRecord, Reagent  # noqa: E402
@@ -80,6 +81,37 @@ def fetch_inventory_records() -> list[InventoryRecord]:
         )
     finally:
         db.close()
+
+
+def make_normalized_record(
+    *,
+    operation_text: str = "领取",
+    operation_type: str = "out",
+    quantity: object = 20,
+    operator: object = "张三",
+    operation_time: datetime = datetime(2026, 5, 20, 10, 0, 0),
+    source_row: int = 9,
+    source_col: int = 2,
+    remark: str | None = "Excel 导入：2026.5!R9C2",
+) -> NormalizedInventoryRecord:
+    """构造直接交给 ImportService 的标准库存流水。"""
+
+    return NormalizedInventoryRecord(
+        year=2026,
+        month=5,
+        event_date=operation_time.date(),
+        reagent_name="丙酮（MOS）",
+        operation_text=operation_text,
+        operation_type=operation_type,
+        quantity=float(quantity),
+        operator=str(operator) if operator is not None else "",
+        remark=remark,
+        source="excel",
+        source_sheet="2026.5",
+        source_row=source_row,
+        source_col=source_col,
+        operation_time=operation_time,
+    )
 
 
 def test_parse_sheet_year_month_supports_common_separators() -> None:
@@ -389,5 +421,151 @@ def test_import_excel_invalid_day_is_error_not_crash() -> None:
         assert result.failed == 1
         assert "日期超出当月范围" in result.errors[0].reason
         assert fetch_inventory_records() == []
+    finally:
+        db.close()
+
+
+def test_import_service_skips_duplicate_business_key_in_same_batch() -> None:
+    """同一批次内业务字段相同但来源行列不同，只应新增一条。"""
+
+    reset_db()
+    db = SessionLocal()
+    try:
+        records = [
+            make_normalized_record(source_row=9, source_col=2, remark="Excel 导入：2026.5!R9C2"),
+            make_normalized_record(source_row=10, source_col=5, remark="Excel 导入：2026.5!R10C5"),
+        ]
+        result = ImportService(db).import_records(records)
+        db.commit()
+
+        assert result.created == 1
+        assert result.skipped == 1
+        assert result.failed == 0
+        assert len(fetch_inventory_records()) == 1
+    finally:
+        db.close()
+
+
+def test_import_service_business_dedup_ignores_remark_and_source_position() -> None:
+    """remark/source_row/source_col 不参与业务去重。"""
+
+    reset_db()
+    db = SessionLocal()
+    try:
+        records = [
+            make_normalized_record(source_row=23, source_col=5, remark="Excel 导入：2026.5!R23C5"),
+            make_normalized_record(source_row=24, source_col=8, remark="Excel 导入：2026.5!R24C8"),
+        ]
+        result = ImportService(db).import_records(records)
+        db.commit()
+
+        assert result.created == 1
+        assert result.skipped == 1
+        assert len(fetch_inventory_records()) == 1
+    finally:
+        db.close()
+
+
+def test_import_service_normalizes_out_synonyms_in_same_batch() -> None:
+    """领取和出库归一化后应识别为同一条出库记录。"""
+
+    reset_db()
+    db = SessionLocal()
+    try:
+        records = [
+            make_normalized_record(operation_text="领取", operation_type="领取", source_row=9),
+            make_normalized_record(operation_text="出库", operation_type="出库", source_row=10),
+        ]
+        result = ImportService(db).import_records(records)
+        db.commit()
+
+        assert result.created == 1
+        assert result.skipped == 1
+        record = fetch_inventory_records()[0]
+        assert record.operation_type == "out"
+        assert record.quantity_change == -20
+    finally:
+        db.close()
+
+
+def test_import_service_normalizes_signed_quantity_in_same_batch() -> None:
+    """出库数量 20 和 -20 归一化后应识别为重复。"""
+
+    reset_db()
+    db = SessionLocal()
+    try:
+        records = [
+            make_normalized_record(operation_text="领取", operation_type="out", quantity=20, source_row=9),
+            make_normalized_record(operation_text="领取", operation_type="out", quantity=-20, source_row=10),
+        ]
+        result = ImportService(db).import_records(records)
+        db.commit()
+
+        assert result.created == 1
+        assert result.skipped == 1
+        assert len(fetch_inventory_records()) == 1
+    finally:
+        db.close()
+
+
+def test_import_service_normalizes_blank_operator_in_same_batch() -> None:
+    """空字符串、空格和 '-' 都归一化为 '-'，只新增一条。"""
+
+    reset_db()
+    db = SessionLocal()
+    try:
+        records = [
+            make_normalized_record(operator="", source_row=9),
+            make_normalized_record(operator="   ", source_row=10),
+            make_normalized_record(operator="-", source_row=11),
+        ]
+        result = ImportService(db).import_records(records)
+        db.commit()
+
+        assert result.created == 1
+        assert result.skipped == 2
+        record = fetch_inventory_records()[0]
+        assert record.operator_name == "-"
+    finally:
+        db.close()
+
+
+def test_import_service_normalizes_microseconds_in_same_batch() -> None:
+    """业务时间精确到秒，微秒不同不应导致重复导入。"""
+
+    reset_db()
+    db = SessionLocal()
+    try:
+        records = [
+            make_normalized_record(operation_time=datetime(2026, 5, 20, 10, 0, 0), source_row=9),
+            make_normalized_record(operation_time=datetime(2026, 5, 20, 10, 0, 0, 123456), source_row=10),
+        ]
+        result = ImportService(db).import_records(records)
+        db.commit()
+
+        assert result.created == 1
+        assert result.skipped == 1
+        assert fetch_inventory_records()[0].created_at == datetime(2026, 5, 20, 10, 0, 0)
+    finally:
+        db.close()
+
+
+def test_import_service_different_date_or_operator_is_not_duplicate() -> None:
+    """日期或操作员不同属于不同业务记录。"""
+
+    reset_db()
+    db = SessionLocal()
+    try:
+        records = [
+            make_normalized_record(operator="张三", operation_time=datetime(2026, 5, 20, 10, 0, 0), source_row=9),
+            make_normalized_record(operator="张三", operation_time=datetime(2026, 5, 21, 10, 0, 0), source_row=10),
+            make_normalized_record(operator="李四", operation_time=datetime(2026, 5, 20, 10, 0, 0), source_row=11),
+        ]
+        result = ImportService(db).import_records(records)
+        db.commit()
+
+        assert result.created == 3
+        assert result.skipped == 0
+        assert len(fetch_inventory_records()) == 3
     finally:
         db.close()

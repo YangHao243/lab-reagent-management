@@ -1,4 +1,4 @@
 export default definePageConfig({
-  navigationBarTitleText: "仪表盘",
+  navigationBarTitleText: "库存流水",
   enablePullDownRefresh: true,
 });

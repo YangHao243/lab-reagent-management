@@ -1,4 +1,4 @@
 export default definePageConfig({
-  navigationBarTitleText: "仪表盘",
+  navigationBarTitleText: "报警事件",
   enablePullDownRefresh: true,
 });

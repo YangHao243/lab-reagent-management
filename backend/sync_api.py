@@ -42,19 +42,26 @@ class SyncStatusResponse(BaseModel):
     client_id_configured: bool = Field(..., description="是否配置腾讯应用 ID")
     client_secret_configured: bool = Field(..., description="是否配置腾讯应用密钥")
     redirect_uri_configured: bool = Field(..., description="是否配置 OAuth 回调地址")
+    access_token_configured: bool = Field(default=False, description="是否配置 Direct Token 模式 access_token")
     doc_id_configured: bool = Field(..., description="是否配置目标腾讯文档 ID")
     token_saved: bool = Field(..., description="是否保存授权 token")
     token_valid: bool = Field(default=False, description="腾讯文档 token 是否有效")
     token_expires_at: str | None = Field(default=None, description="腾讯文档 token 过期时间")
     open_id_saved: bool = Field(default=False, description="是否已保存 open_id")
     ready_for_oauth: bool = Field(default=False, description="是否具备 OAuth 授权配置")
+    ready_for_direct_token: bool = Field(default=False, description="是否具备 Direct Token 同步配置")
+    sheet_read_endpoint_configured: bool = Field(default=False, description="是否配置表格读取 endpoint")
+    sheet_write_endpoint_configured: bool = Field(default=False, description="是否配置表格写入 endpoint")
+    ready_for_api_endpoint: bool = Field(default=False, description="是否具备表格读写 endpoint 配置")
     ready_for_sync: bool = Field(default=False, description="是否具备真实同步条件")
+    auth_mode: str = Field(default="oauth", description="腾讯文档授权模式")
     doc_id: str | None = Field(default=None, description="目标腾讯文档 ID")
     description: str = Field(..., description="同步模式说明")
     # 兼容旧页面字段。
     has_client_id: bool = Field(..., description="是否配置 client_id")
     has_client_secret: bool = Field(..., description="是否配置 client_secret")
     has_redirect_uri: bool = Field(..., description="是否配置 redirect_uri")
+    has_access_token: bool = Field(default=False, description="是否配置 access_token")
     has_doc_id: bool = Field(..., description="是否配置 doc_id")
     has_sheet_id: bool = Field(..., description="是否配置 sheet_id")
     has_token: bool = Field(..., description="是否保存 token")
@@ -71,6 +78,8 @@ class SyncImportResponse(BaseModel):
     errors: list[dict[str, Any]] = Field(default_factory=list, description="错误明细")
     log_id: int = Field(..., description="同步日志 ID")
     created_count: int = Field(default=0, description="兼容字段：新增数量")
+    imported_count: int = Field(default=0, description="兼容字段：导入数量")
+    skipped_count: int = Field(default=0, description="兼容字段：跳过数量")
     updated_count: int = Field(default=0, description="兼容字段：更新数量")
     failed_count: int = Field(default=0, description="兼容字段：失败数量")
     created_reagents: int = Field(default=0, description="新增试剂数量")
@@ -103,13 +112,13 @@ class SyncLogResponse(BaseModel):
 def build_import_response(result_data: dict[str, Any], log_id: int) -> SyncImportResponse:
     """补齐兼容字段并构造导入响应。"""
 
-    return SyncImportResponse(
-        **result_data,
-        log_id=log_id,
-        created_count=result_data.get("created", 0),
-        updated_count=result_data.get("updated_reagents", 0),
-        failed_count=result_data.get("failed", 0),
-    )
+    payload = {**result_data, "log_id": log_id}
+    payload.setdefault("created_count", payload.get("created", 0))
+    payload.setdefault("imported_count", payload.get("created", 0))
+    payload.setdefault("skipped_count", payload.get("skipped", 0))
+    payload.setdefault("updated_count", payload.get("updated_reagents", 0))
+    payload.setdefault("failed_count", payload.get("failed", 0))
+    return SyncImportResponse(**payload)
 
 
 def get_status_payload() -> dict[str, Any]:
@@ -246,6 +255,8 @@ async def run_excel_import(
         created_count=created_count,
         updated_count=updated_count,
         failed_count=failed_count,
+        imported_count=created_count,
+        skipped_count=0,
         created_reagents=created_count,
         updated_reagents=updated_count,
     )

@@ -1,0 +1,189 @@
+.reports-page {
+  .year-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .year-button {
+    width: 150px;
+    margin: 0;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #334155;
+  }
+
+  .year-text {
+    color: #0f172a;
+    font-size: 34px;
+    font-weight: 800;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .summary-card {
+    padding: 22px;
+    border: 1px solid #e2e8f0;
+    border-radius: 18px;
+    background: #ffffff;
+  }
+
+  .summary-value {
+    display: block;
+    color: #155e75;
+    font-size: 38px;
+    font-weight: 800;
+  }
+
+  .summary-label {
+    display: block;
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 23px;
+  }
+
+  .annual-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .annual-card {
+    padding: 22px;
+    border-radius: 16px;
+  }
+
+  .annual-card.in {
+    background: #ecfdf5;
+  }
+
+  .annual-card.out {
+    background: #fff7ed;
+  }
+
+  .annual-value {
+    display: block;
+    color: #0f172a;
+    font-size: 36px;
+    font-weight: 800;
+  }
+
+  .annual-label {
+    display: block;
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 22px;
+  }
+
+  .month-row {
+    display: flex;
+    gap: 14px;
+    padding: 16px 0;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .month-row:last-child {
+    border-bottom: 0;
+  }
+
+  .month-label {
+    width: 70px;
+    flex-shrink: 0;
+    color: #0f172a;
+    font-size: 24px;
+    font-weight: 700;
+  }
+
+  .bar-group {
+    flex: 1;
+  }
+
+  .bar-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .bar-name {
+    width: 26px;
+    flex-shrink: 0;
+    color: #64748b;
+    font-size: 22px;
+  }
+
+  .bar-track,
+  .rank-track {
+    flex: 1;
+    height: 14px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e2e8f0;
+  }
+
+  .bar-fill,
+  .rank-fill {
+    height: 100%;
+    border-radius: 999px;
+  }
+
+  .bar-fill.in {
+    background: #10b981;
+  }
+
+  .bar-fill.out,
+  .rank-fill {
+    background: #f97316;
+  }
+
+  .bar-value {
+    width: 42px;
+    color: #334155;
+    font-size: 22px;
+    text-align: right;
+  }
+
+  .rank-row {
+    padding: 18px 0;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .rank-row:last-child {
+    border-bottom: 0;
+  }
+
+  .rank-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 10px;
+  }
+
+  .rank-name {
+    flex: 1;
+    overflow: hidden;
+    color: #0f172a;
+    font-size: 25px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rank-value {
+    color: #ea580c;
+    font-size: 24px;
+    font-weight: 800;
+  }
+
+  .rank-meta {
+    display: block;
+    margin-top: 8px;
+    color: #94a3b8;
+    font-size: 22px;
+  }
+}

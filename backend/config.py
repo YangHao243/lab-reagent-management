@@ -69,8 +69,31 @@ class Settings(BaseSettings):
     TENCENT_DOCS_CLIENT_ID: str = ""
     TENCENT_DOCS_CLIENT_SECRET: str = ""
     TENCENT_DOCS_REDIRECT_URI: str = ""
+    TENCENT_DOCS_ACCESS_TOKEN: str = ""
+    TENCENT_DOCS_OPEN_ID: str = ""
+    TENCENT_DOCS_ENCODED_ID: str = ""
     TENCENT_DOCS_FILE_ID: str = ""
+    TENCENT_DOCS_BOOK_ID: str = ""
+    TENCENT_DOCS_SHEET_ID: str = ""
+    TENCENT_DOCS_SHEET_TITLE: str = ""
+    TENCENT_DOCS_TAB_ID: str = ""
+    TENCENT_DOCS_API_BASE_URL: str = "https://docs.qq.com"
+    TENCENT_DOCS_SHEET_READ_ENDPOINT: str = ""
+    TENCENT_DOCS_SHEET_WRITE_ENDPOINT: str = ""
+    TENCENT_DOCS_READ_PATH: str = ""
+    TENCENT_DOCS_UPDATE_PATH: str = ""
+    TENCENT_DOCS_SHEET_RANGE: str = "A1:BF37"
+    TENCENT_DOCS_READ_RANGE: str = "A1:BF37"
+    TENCENT_DOCS_WRITE_RANGE: str = "B4:BF34"
+    TENCENT_DOCS_TEMPLATE_TYPE: str = "reagent_matrix"
+    # 正式导入/同步不依赖固定 TENCENT_DOCS_SHEET_ID；调试/legacy 兜底使用。
+    TENCENT_DOCS_SHEET_MAP_JSON: str = ""
+    TENCENT_DOCS_SHEET_TITLE_PATTERN: str = "{year}.{month}"
+    TENCENT_DOCS_ACTIVE_MONTH: int = 1
     TENCENT_DOCS_DEFAULT_YEAR: int = 2026
+    TENCENT_DOCS_TOKEN_EXPIRES_AT: str = ""
+    TENCENT_DOCS_WRITE_CELL_TEST_SHEET_ID: str = "000001"
+    TENCENT_DOCS_WRITE_CELL_TEST_RANGE: str = "A1:A1"
 
     # 本地同步配置：生产环境可通过 .env 设置为 false 隐藏/禁用 Mock 同步入口
     SYNC_MOCK_ENABLED: bool = True

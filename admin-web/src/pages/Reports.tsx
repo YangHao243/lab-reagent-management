@@ -36,6 +36,9 @@ type TopConsumed = {
   unit: string;
   out_count: number;
   total_consumed: number;
+  inbound_count: number;
+  inbound_quantity: number;
+  correction_quantity: number;
 };
 
 type CategorySummary = {
@@ -66,11 +69,29 @@ const emptyChartData: ChartData = {
 const topConsumedColumns: ColumnsType<TopConsumed> = [
   { title: "试剂ID", dataIndex: "reagent_id", width: 90 },
   { title: "试剂", dataIndex: "name_cn" },
-  { title: "出库次数", dataIndex: "out_count", width: 110 },
+  { title: "出库次数", dataIndex: "out_count", width: 90, align: "right" },
   {
     title: "消耗量",
-    width: 120,
+    width: 100,
+    align: "right",
     render: (_, record) => `${record.total_consumed} ${record.unit}`,
+  },
+  { title: "入库次数", dataIndex: "inbound_count", width: 90, align: "right" },
+  {
+    title: "入库数量",
+    width: 100,
+    align: "right",
+    render: (_, record) => `${record.inbound_quantity ?? 0} ${record.unit}`,
+  },
+  {
+    title: "校正量",
+    width: 100,
+    align: "right",
+    render: (_, record) => {
+      const value = record.correction_quantity ?? 0;
+      if (value > 0) return `+${value} ${record.unit}`;
+      return `${value} ${record.unit}`;
+    },
   },
 ];
 

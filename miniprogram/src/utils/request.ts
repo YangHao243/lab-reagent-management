@@ -1,6 +1,5 @@
 import Taro from "@tarojs/taro";
-
-export const API_BASE_URL = "http://127.0.0.1:8010";
+import { API_BASE_URL, TOKEN_STORAGE_KEY, USER_STORAGE_KEY } from "../config";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 type QueryValue = string | number | boolean | null | undefined;
@@ -11,6 +10,21 @@ type RequestOptions = {
   data?: unknown;
   params?: Record<string, QueryValue>;
   header?: Record<string, string>;
+  skipAuthRedirect?: boolean;
+};
+
+export type CurrentUser = {
+  id: number;
+  username: string;
+  full_name?: string | null;
+  role: "member" | "manager" | "admin" | "superadmin" | string;
+  is_active?: boolean;
+};
+
+export type LoginResponse = {
+  access_token: string;
+  token_type: string;
+  user: CurrentUser;
 };
 
 function buildUrl(url: string, params?: Record<string, QueryValue>) {
@@ -51,14 +65,43 @@ function getErrorMessage(data: unknown, statusCode: number) {
   return `请求失败：${statusCode}`;
 }
 
-// 小程序端统一请求封装，后续登录 token 可以在这里集中追加。
+export function getToken() {
+  return Taro.getStorageSync<string>(TOKEN_STORAGE_KEY);
+}
+
+export function setAuth(token: string, user: CurrentUser) {
+  Taro.setStorageSync(TOKEN_STORAGE_KEY, token);
+  Taro.setStorageSync(USER_STORAGE_KEY, user);
+}
+
+export function clearAuth() {
+  Taro.removeStorageSync(TOKEN_STORAGE_KEY);
+  Taro.removeStorageSync(USER_STORAGE_KEY);
+}
+
+export function getCurrentUser() {
+  return Taro.getStorageSync<CurrentUser>(USER_STORAGE_KEY);
+}
+
+function redirectToLogin() {
+  const pages = Taro.getCurrentPages();
+  const currentRoute = pages[pages.length - 1]?.route || "";
+  if (currentRoute !== "pages/profile/index") {
+    Taro.navigateTo({ url: "/pages/profile/index" });
+  }
+}
+
+// 小程序端统一请求封装：集中处理 API 地址、token、401/403 和网络错误。
 export function request<T = unknown>({
   url,
   method = "GET",
   data,
   params,
   header,
+  skipAuthRedirect = false,
 }: RequestOptions): Promise<T> {
+  const token = getToken();
+
   return new Promise((resolve, reject) => {
     Taro.request<T>({
       url: buildUrl(url, params),
@@ -66,6 +109,7 @@ export function request<T = unknown>({
       data,
       header: {
         "content-type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...header,
       },
       success: (response) => {
@@ -74,11 +118,35 @@ export function request<T = unknown>({
           return;
         }
 
-        reject(new Error(getErrorMessage(response.data, response.statusCode)));
+        const message = getErrorMessage(response.data, response.statusCode);
+        if (response.statusCode === 401 && !skipAuthRedirect && !url.includes("/users/login")) {
+          clearAuth();
+          Taro.showToast({ title: "登录已过期，请重新登录", icon: "none" });
+          redirectToLogin();
+        } else if (response.statusCode === 403) {
+          Taro.showToast({ title: "当前用户无权限", icon: "none" });
+        }
+
+        reject(new Error(message));
       },
       fail: (error) => {
-        reject(new Error(error.errMsg || "网络请求失败"));
+        const message = error.errMsg || "网络异常，请检查后端服务";
+        Taro.showToast({ title: message, icon: "none" });
+        reject(new Error(message));
       },
     });
   });
 }
+
+export async function login(username: string, password: string) {
+  const result = await request<LoginResponse>({
+    url: "/users/login",
+    method: "POST",
+    data: { username, password },
+    skipAuthRedirect: true,
+  });
+  setAuth(result.access_token, result.user);
+  return result;
+}
+
+export { API_BASE_URL };

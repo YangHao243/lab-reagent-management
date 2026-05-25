@@ -3,7 +3,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
 
   .search-input {
@@ -11,72 +11,130 @@
     flex: 1;
     min-height: 78px;
     padding: 0 18px;
-    border: 1px solid #d1d5db;
-    border-radius: 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 14px;
     background: #ffffff;
   }
 
   .search-button {
-    width: 130px;
+    width: 126px;
     height: 78px;
     margin: 0;
-    border-radius: 10px;
-    background: #0f766e;
+    border-radius: 14px;
+    background: #155e75;
     color: #ffffff;
     line-height: 78px;
+  }
+
+  .category-scroll {
+    width: 100%;
+    margin-bottom: 18px;
+    white-space: nowrap;
+  }
+
+  .category-row {
+    display: flex;
+    min-width: max-content;
+    padding-bottom: 2px;
   }
 
   .reagent-card {
     box-sizing: border-box;
     margin-bottom: 18px;
     padding: 24px;
-    border: 1px solid #e5e7eb;
-    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 18px;
     background: #ffffff;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
   }
 
   .reagent-card.low-stock {
     border-color: #fecaca;
-    background: #fff7f7;
-  }
-
-  .reagent-card.low-stock .reagent-line {
-    color: #7f1d1d;
+    background: #fffafa;
   }
 
   .card-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    margin-bottom: 8px;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .name-block {
+    flex: 1;
+    min-width: 0;
   }
 
   .reagent-name {
-    color: #111827;
+    display: block;
+    overflow: hidden;
+    color: #0f172a;
     font-size: 32px;
-    font-weight: 700;
-  }
-
-  .low-stock-tag {
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: #fee2e2;
-    color: #dc2626;
-    font-size: 22px;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .reagent-subtitle {
     display: block;
-    margin-bottom: 12px;
-    color: #6b7280;
-    font-size: 24px;
+    overflow: hidden;
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 23px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .info-item {
+    padding: 14px;
+    border-radius: 14px;
+    background: #f8fafc;
+  }
+
+  .info-label {
+    display: block;
+    margin-bottom: 6px;
+    color: #64748b;
+    font-size: 22px;
+  }
+
+  .info-value {
+    display: block;
+    overflow: hidden;
+    color: #0f172a;
+    font-size: 26px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .info-value.danger {
+    color: #dc2626;
   }
 
   .reagent-line {
     display: block;
-    margin-top: 6px;
-    color: #374151;
-    font-size: 25px;
+    overflow: hidden;
+    color: #475569;
+    font-size: 24px;
     line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .list-footer {
+    display: block;
+    padding: 22px 0;
+    color: #94a3b8;
+    font-size: 23px;
+    text-align: center;
   }
 }

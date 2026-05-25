@@ -1,11 +1,100 @@
-.low-stock-notice {
-  margin-bottom: 12px;
-  padding: 14px 16px;
-  border-radius: 8px;
-  background: #fee2e2;
-}
+.reagent-detail-page {
+  .stock-panel {
+    box-sizing: border-box;
+    margin-bottom: 20px;
+    padding: 26px;
+    border: 1px solid #bbf7d0;
+    border-radius: 20px;
+    background: #f0fdf4;
+  }
 
-.low-stock-text {
-  color: #b91c1c;
-  font-size: 24px;
+  .stock-panel.low {
+    border-color: #fecaca;
+    background: #fff7f7;
+  }
+
+  .stock-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .name-block {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .reagent-name {
+    display: block;
+    color: #0f172a;
+    font-size: 34px;
+    font-weight: 800;
+  }
+
+  .reagent-subtitle {
+    display: block;
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 24px;
+  }
+
+  .stock-item {
+    padding: 18px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.78);
+  }
+
+  .stock-label {
+    display: block;
+    margin-bottom: 6px;
+    color: #64748b;
+    font-size: 22px;
+  }
+
+  .stock-value {
+    display: block;
+    color: #0f172a;
+    font-size: 30px;
+    font-weight: 800;
+  }
+
+  .stock-value.danger {
+    color: #dc2626;
+  }
+
+  .detail-row {
+    display: flex;
+    gap: 18px;
+    padding: 18px 0;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .detail-row:last-child {
+    border-bottom: 0;
+  }
+
+  .detail-label {
+    width: 150px;
+    flex-shrink: 0;
+    color: #64748b;
+    font-size: 24px;
+  }
+
+  .detail-value {
+    flex: 1;
+    color: #0f172a;
+    font-size: 25px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  .action-row {
+    display: flex;
+    gap: 16px;
+  }
+
+  .action-button {
+    flex: 1;
+  }
 }

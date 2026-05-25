@@ -386,6 +386,15 @@ def refresh_access_token(refresh_token: str | None = None) -> dict[str, Any]:
 def get_current_token_data() -> dict[str, Any]:
     """读取当前 token，缺少时返回明确错误。"""
 
+    direct_access_token = settings.TENCENT_DOCS_ACCESS_TOKEN.strip()
+    direct_open_id = settings.TENCENT_DOCS_OPEN_ID.strip()
+    if direct_access_token and direct_open_id:
+        return {
+            "access_token": direct_access_token,
+            "open_id": direct_open_id,
+            "source": "direct_token",
+        }
+
     token_data = load_token_data()
     if not token_data or not token_data.get("access_token"):
         raise HTTPException(
@@ -419,7 +428,8 @@ def tencent_openapi_request(
     url = urljoin(settings.TENCENT_DOC_API_BASE_URL.rstrip("/") + "/", path.lstrip("/"))
     headers = {
         "Access-Token": access_token,
-        "Client-Id": settings.TENCENT_DOC_CLIENT_ID,
+        "Client-Id": settings.TENCENT_DOCS_CLIENT_ID.strip()
+        or settings.TENCENT_DOC_CLIENT_ID,
         "Open-Id": str(open_id),
         "Content-Type": "application/json",
     }
@@ -864,45 +874,16 @@ def api_import_from_tencent_docs(
     current_user: User = Depends(require_roles("admin", "superadmin")),
     db: Session = Depends(get_db),
 ) -> FileImportResponse:
-    """从腾讯文档 Open API 读取表格行，并新增或更新到本地数据库。"""
+    """旧版真实 API 导入入口已废弃。
 
-    _ = current_user
-    try:
-        rows = fetch_tencent_doc_rows()
-        created_count, updated_count, failed_count = upsert_reagent_rows(db, rows)
-        sync_log = create_sync_log(
-            db=db,
-            sync_type="api_import",
-            status_value="success",
-            message=(
-                f"真实 API 导入完成：新增 {created_count} 条，"
-                f"更新 {updated_count} 条，失败 {failed_count} 条"
-            ),
-            source="tencent_docs_api",
-        )
-        db.commit()
-        db.refresh(sync_log)
-    except HTTPException as exc:
-        write_failed_sync_log_safely(db, "api_import", str(exc.detail))
-        raise
-    except SQLAlchemyError as exc:
-        write_failed_sync_log_safely(db, "api_import", "真实 API 导入写入数据库失败")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="真实 API 导入写入数据库失败",
-        ) from exc
-    except Exception as exc:
-        write_failed_sync_log_safely(db, "api_import", f"真实 API 导入失败：{exc}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"真实 API 导入失败：{exc}",
-        ) from exc
+    该旧接口曾经只导入试剂主数据，绕过库存流水标准化导入链路。为避免误用，
+    统一要求使用 /api/sync/excel/import 或未来的 /api/tencent-docs/import。
+    """
 
-    return FileImportResponse(
-        created_count=created_count,
-        updated_count=updated_count,
-        failed_count=failed_count,
-        log_id=sync_log.id,
+    _ = current_user, db
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="该旧接口已废弃，请使用 /api/sync/excel/import 或 /api/tencent-docs/import",
     )
 
 

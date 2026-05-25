@@ -177,6 +177,9 @@ class TopConsumedItem(BaseModel):
     unit: str = Field(..., description="库存单位")
     out_count: int = Field(..., description="出库次数")
     total_consumed: float = Field(..., description="出库消耗总量")
+    inbound_count: int = Field(default=0, description="入库次数")
+    inbound_quantity: float = Field(default=0.0, description="入库数量")
+    correction_quantity: float = Field(default=0.0, description="校正量（保留正负号）")
 
 
 class CategorySummaryItem(BaseModel):
@@ -646,22 +649,45 @@ def get_top_consumed(
     start_at = datetime.combine(start_date, time.min)
     end_at = datetime.combine(end_date + timedelta(days=1), time.min)
 
-    # SQLite 支持 abs()，出库数量按变化量绝对值合计。
-    consumed_quantity = func.sum(func.abs(InventoryRecord.quantity_change))
+    # Conditional aggregation via case expressions; coalesce to 0.
+    zero = func.coalesce(0, 0)
+    _out_count = func.coalesce(
+        func.sum(case((InventoryRecord.operation_type == "out", 1), else_=0)), 0
+    )
+    _consumed_qty = func.coalesce(
+        func.sum(case((InventoryRecord.operation_type == "out",
+                       func.abs(InventoryRecord.quantity_change)), else_=0)), 0.0
+    )
+    _in_count = func.coalesce(
+        func.sum(case((InventoryRecord.operation_type == "in", 1), else_=0)), 0
+    )
+    _in_qty = func.coalesce(
+        func.sum(case((InventoryRecord.operation_type == "in",
+                       func.abs(InventoryRecord.quantity_change)), else_=0)), 0.0
+    )
+    # Correction keeps sign — do not use abs()
+    _corr_qty = func.coalesce(
+        func.sum(case((InventoryRecord.operation_type == "adjust",
+                       InventoryRecord.quantity_change), else_=0.0)), 0.0
+    )
+
     stmt = (
         select(
             Reagent.id,
             Reagent.name_cn,
             Reagent.unit,
-            func.count(InventoryRecord.id),
-            consumed_quantity,
+            _out_count,
+            _consumed_qty,
+            _in_count,
+            _in_qty,
+            _corr_qty,
         )
         .join(Reagent, InventoryRecord.reagent_id == Reagent.id)
-        .where(InventoryRecord.operation_type == "out")
+        .where(InventoryRecord.operation_type.in_(["in", "out", "adjust"]))
         .where(InventoryRecord.created_at >= start_at)
         .where(InventoryRecord.created_at < end_at)
         .group_by(Reagent.id, Reagent.name_cn, Reagent.unit)
-        .order_by(consumed_quantity.desc())
+        .order_by(_consumed_qty.desc(), _out_count.desc(), Reagent.id.asc())
         .limit(limit)
     )
 
@@ -673,6 +699,9 @@ def get_top_consumed(
             unit=row[2],
             out_count=int(row[3] or 0),
             total_consumed=float(row[4] or 0),
+            inbound_count=int(row[5] or 0),
+            inbound_quantity=float(row[6] or 0),
+            correction_quantity=float(row[7] or 0),
         )
         for row in rows
     ]

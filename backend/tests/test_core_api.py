@@ -781,3 +781,13 @@ def test_signed_quantity_converts_positive_outbound_quantity() -> None:
     assert get_signed_quantity("out", 20) == -20
     assert get_signed_quantity("领取", 20) == -20
     assert get_signed_quantity("in", -10) == 10
+
+
+def test_legacy_tencent_docs_api_import_is_deprecated(client: TestClient) -> None:
+    """旧 /tencent-docs/api/import 不应再绕过统一 ImportService。"""
+
+    headers = auth_headers(client)
+    response = client.post("/tencent-docs/api/import", headers=headers)
+
+    assert response.status_code == 410
+    assert "旧接口已废弃" in response.json()["detail"]

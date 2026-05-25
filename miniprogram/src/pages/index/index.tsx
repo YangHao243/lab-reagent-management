@@ -1,6 +1,6 @@
-import Taro from "@tarojs/taro";
+import Taro, { useDidShow, usePullDownRefresh } from "@tarojs/taro";
 import { Button, Text, View } from "@tarojs/components";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { request } from "../../utils/request";
 import "./index.scss";
 
@@ -12,25 +12,20 @@ type Summary = {
   today_out_count?: number;
   month_in_count?: number;
   month_out_count?: number;
+  total_inventory_records?: number;
 };
 
 type Reagent = {
   id: number;
   name_cn: string;
-  category?: string;
+  category?: string | null;
   current_quantity: number;
   warning_threshold: number;
-  unit?: string;
-  location?: string;
+  unit?: string | null;
+  location?: string | null;
 };
 
-type ActionItem = {
-  title: string;
-  url: string;
-  selectReagentFirst?: boolean;
-};
-
-const defaultSummary: Summary = {
+const defaultSummary: Required<Summary> = {
   reagent_total: 0,
   total_reagents: 0,
   low_stock_count: 0,
@@ -38,35 +33,29 @@ const defaultSummary: Summary = {
   today_out_count: 0,
   month_in_count: 0,
   month_out_count: 0,
+  total_inventory_records: 0,
 };
 
-const actions: ActionItem[] = [
-  { title: "试剂列表", url: "/pages/reagent-list/index" },
-  { title: "入库", url: "/pages/reagent-list/index", selectReagentFirst: true },
-  { title: "出库", url: "/pages/reagent-list/index", selectReagentFirst: true },
-  { title: "报警", url: "/pages/alerts/index" },
-  { title: "我的", url: "/pages/profile/index" },
-];
-
 function normalizeSummary(data: Summary): Required<Summary> {
+  const reagentTotal = data.reagent_total ?? data.total_reagents ?? 0;
   return {
-    reagent_total: data.reagent_total ?? data.total_reagents ?? 0,
-    total_reagents: data.total_reagents ?? data.reagent_total ?? 0,
+    reagent_total: reagentTotal,
+    total_reagents: reagentTotal,
     low_stock_count: data.low_stock_count ?? 0,
     today_in_count: data.today_in_count ?? 0,
     today_out_count: data.today_out_count ?? 0,
     month_in_count: data.month_in_count ?? 0,
     month_out_count: data.month_out_count ?? 0,
+    total_inventory_records: data.total_inventory_records ?? 0,
   };
 }
 
 export default function Index() {
-  const [summary, setSummary] = useState<Summary>(defaultSummary);
+  const [summary, setSummary] = useState<Required<Summary>>(defaultSummary);
   const [lowStock, setLowStock] = useState<Reagent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // 首页加载库存总览和低库存试剂，方便实验室成员快速判断库存状态。
   const loadDashboard = async () => {
     setLoading(true);
     setError("");
@@ -79,60 +68,59 @@ export default function Index() {
       setSummary(normalizeSummary(summaryData));
       setLowStock(lowStockData);
     } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : "首页数据加载失败";
+      const message = requestError instanceof Error ? requestError.message : "仪表盘数据加载失败";
       setError(message);
-      Taro.showToast({ title: message, icon: "none" });
     } finally {
       setLoading(false);
+      Taro.stopPullDownRefresh();
     }
   };
 
-  useEffect(() => {
+  useDidShow(() => {
     loadDashboard();
-  }, []);
+  });
 
-  const openAction = (item: ActionItem) => {
-    if (item.selectReagentFirst) {
-      Taro.showToast({ title: "请先选择试剂", icon: "none" });
-    }
-    Taro.navigateTo({ url: item.url });
-  };
+  usePullDownRefresh(() => {
+    loadDashboard();
+  });
+
+  const stats = [
+    { label: "试剂总数", value: summary.reagent_total, tone: "blue" },
+    { label: "低库存", value: summary.low_stock_count, tone: "red" },
+    { label: "今日入库", value: summary.today_in_count, tone: "green" },
+    { label: "今日出库", value: summary.today_out_count, tone: "orange" },
+    { label: "本月入库", value: summary.month_in_count, tone: "green" },
+    { label: "本月出库", value: summary.month_out_count, tone: "orange" },
+  ];
 
   const openReagentDetail = (id: number) => {
-    Taro.navigateTo({ url: `/pages/reagent-detail/index?id=${id}` });
+    Taro.navigateTo({ url: `/pages/reagent-detail/index?reagent_id=${id}` });
   };
 
   return (
-    <View className="page index-page">
+    <View className="page dashboard-page">
       <View className="hero">
+        <Text className="hero-eyebrow">Lab Reagent</Text>
         <Text className="hero-title">实验室试剂仓库管理</Text>
-        <Text className="hero-subtitle">库存总览、出入库和报警信息集中查看</Text>
+        <Text className="hero-subtitle">查看库存总览、低库存提醒和近期出入库状态</Text>
       </View>
+
+      {error ? (
+        <View className="panel state-card">
+          <Text className="state-title">数据加载失败</Text>
+          <Text className="muted-text">{error}</Text>
+          <Button className="state-action" loading={loading} onClick={loadDashboard}>
+            重试
+          </Button>
+        </View>
+      ) : null}
 
       <View className="summary-grid">
-        <View className="summary-card">
-          <Text className="summary-value">{summary.reagent_total ?? summary.total_reagents ?? 0}</Text>
-          <Text className="summary-label">试剂总数</Text>
-        </View>
-        <View className="summary-card warning">
-          <Text className="summary-value">{summary.low_stock_count ?? 0}</Text>
-          <Text className="summary-label">低库存数量</Text>
-        </View>
-        <View className="summary-card">
-          <Text className="summary-value">{summary.today_in_count ?? 0}</Text>
-          <Text className="summary-label">今日入库次数</Text>
-        </View>
-        <View className="summary-card">
-          <Text className="summary-value">{summary.today_out_count ?? 0}</Text>
-          <Text className="summary-label">今日出库次数</Text>
-        </View>
-      </View>
-
-      <View className="action-grid">
-        {actions.map((item) => (
-          <Button className="action-button" key={item.title} onClick={() => openAction(item)}>
-            {item.title}
-          </Button>
+        {stats.map((item) => (
+          <View className={`summary-card ${item.tone}`} key={item.label}>
+            <Text className="summary-value">{item.value}</Text>
+            <Text className="summary-label">{item.label}</Text>
+          </View>
         ))}
       </View>
 
@@ -144,17 +132,17 @@ export default function Index() {
           </Button>
         </View>
 
-        {error && <Text className="error-text">{error}</Text>}
-
         {lowStock.length === 0 && !loading ? (
-          <Text className="empty-text">暂无低库存试剂</Text>
+          <View className="empty-box">
+            <Text className="muted-text">暂无低库存试剂</Text>
+          </View>
         ) : (
-          lowStock.slice(0, 6).map((item) => (
+          lowStock.slice(0, 8).map((item) => (
             <View className="reagent-row" key={item.id} onClick={() => openReagentDetail(item.id)}>
-              <View>
+              <View className="reagent-main">
                 <Text className="reagent-name">{item.name_cn}</Text>
                 <Text className="reagent-meta">
-                  位置：{item.location || "未填写"}
+                  {item.category || "未分类"} · {item.location || "未填写位置"}
                 </Text>
               </View>
               <View className="stock-box">

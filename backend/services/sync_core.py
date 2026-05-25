@@ -17,9 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from models import InventoryRecord, Reagent, SyncLog
+from utils.timezone import BEIJING_TZ
 
 
 OperationType = str
+InventoryBusinessKey = tuple[int, str, str, float, datetime]
 
 IN_OPERATION_TYPES = {"in", "stock_in", "入库", "领料入库", "采购入库"}
 OUT_OPERATION_TYPES = {"out", "stock_out", "出库", "领取", "领用", "消耗", "实验领用", "领料"}
@@ -106,17 +108,24 @@ class SyncImportResult:
     def to_response(self, message: str | None = None, log_id: int | None = None) -> dict[str, Any]:
         """转换为接口响应。"""
 
+        extra_detail = getattr(self, "extra_detail", None)
         data = {
             "success": self.success,
             "message": message or self.message,
             "created": self.created,
             "skipped": self.skipped,
             "failed": self.failed,
+            "created_count": self.created,
+            "imported_count": self.created,
+            "skipped_count": self.skipped,
+            "failed_count": self.failed,
             "errors": [error.to_dict() for error in self.errors],
             "created_reagents": self.created_reagents,
             "updated_reagents": self.updated_reagents,
             "monthly_counts": self.monthly_counts,
         }
+        if isinstance(extra_detail, dict):
+            data.update(extra_detail)
         if log_id is not None:
             data["log_id"] = log_id
         return data
@@ -129,10 +138,19 @@ class SyncImportResult:
                 "created": self.created,
                 "skipped": self.skipped,
                 "failed": self.failed,
+                "created_count": self.created,
+                "imported_count": self.created,
+                "skipped_count": self.skipped,
+                "failed_count": self.failed,
                 "created_reagents": self.created_reagents,
                 "updated_reagents": self.updated_reagents,
                 "errors": [error.to_dict() for error in self.errors[:200]],
                 "monthly_counts": self.monthly_counts,
+                **(
+                    getattr(self, "extra_detail", {})
+                    if isinstance(getattr(self, "extra_detail", None), dict)
+                    else {}
+                ),
             },
             ensure_ascii=False,
         )
@@ -217,10 +235,34 @@ def normalize_operator_name(operator: str | None) -> str:
     return (operator or "-").strip() or "-"
 
 
-def normalize_operation_time(record: NormalizedInventoryRecord) -> datetime:
-    """统一导入业务时间，精确到秒，去掉微秒。"""
+def normalize_operator(operator: str | None) -> str:
+    """统一操作人名称的兼容别名，供导入去重逻辑复用。"""
 
-    operation_time = record.operation_time or datetime.combine(record.event_date, time(hour=10))
+    return normalize_operator_name(operator)
+
+
+def normalize_operation_time(value: NormalizedInventoryRecord | datetime | date | str) -> datetime:
+    """统一导入业务时间，精确到秒，去掉微秒。
+
+    外部来源可能传入标准记录、datetime/date 或字符串；无时区字符串按系统业务时间处理，
+    带时区字符串会转为北京时间 naive datetime，保证 Excel、Mock、未来腾讯文档导入可共用。
+    """
+
+    if isinstance(value, NormalizedInventoryRecord):
+        operation_time = value.operation_time or datetime.combine(value.event_date, time(hour=10))
+    elif isinstance(value, datetime):
+        operation_time = value
+    elif isinstance(value, date):
+        operation_time = datetime.combine(value, time(hour=10))
+    else:
+        raw_value = str(value).strip()
+        if not raw_value:
+            raise ValueError("业务时间不能为空")
+        operation_time = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+
+    if operation_time.tzinfo is not None:
+        operation_time = operation_time.astimezone(BEIJING_TZ).replace(tzinfo=None)
+
     return operation_time.replace(microsecond=0)
 
 
@@ -235,13 +277,35 @@ def get_signed_quantity(operation_type: str, quantity: float) -> float:
     return float(quantity)
 
 
-def find_duplicate_inventory_record(
-    db: Session,
+def normalize_signed_quantity(operation_type: str, quantity: float) -> float:
+    """统一带符号库存变化量的兼容别名。"""
+
+    return get_signed_quantity(operation_type, quantity)
+
+
+def build_inventory_unique_key(
     reagent_id: int,
     operation_type: str,
-    operator_name: str,
-    quantity_change: float,
-    operation_time: datetime,
+    operator_name: str | None,
+    quantity: float,
+    operation_time: datetime | date | str,
+) -> InventoryBusinessKey:
+    """构建库存流水业务唯一键。
+
+    唯一键只包含业务事实：试剂、操作类型、操作员、带符号数量和业务时间。
+    reason/remark/source/source_row/source_col/source_hash 只用于溯源，不参与业务去重。
+    """
+
+    normalized_type = normalize_operation_type(operation_type)
+    normalized_operator = normalize_operator_name(operator_name)
+    signed_quantity = normalize_signed_quantity(normalized_type, quantity)
+    normalized_time = normalize_operation_time(operation_time)
+    return (reagent_id, normalized_type, normalized_operator, signed_quantity, normalized_time)
+
+
+def find_duplicate_inventory_record(
+    db: Session,
+    business_key: InventoryBusinessKey,
 ) -> int | None:
     """按业务唯一键查找重复库存流水。
 
@@ -249,6 +313,7 @@ def find_duplicate_inventory_record(
     不包含 reason/remark/source，避免不同导入来源或备注位置变化导致重复导入。
     """
 
+    reagent_id, operation_type, operator_name, quantity_change, operation_time = business_key
     return db.execute(
         select(InventoryRecord.id)
         .where(InventoryRecord.reagent_id == reagent_id)
@@ -303,10 +368,11 @@ class ImportService:
 
         result = SyncImportResult()
         seen_hashes: set[str] = set()
+        seen_business_keys: set[InventoryBusinessKey] = set()
         affected_reagent_ids: set[int] = set()
 
         for record in records:
-            reagent_id = self._import_one_record(record, result, seen_hashes)
+            reagent_id = self._import_one_record(record, result, seen_hashes, seen_business_keys)
             if reagent_id is not None:
                 affected_reagent_ids.add(reagent_id)
 
@@ -322,6 +388,7 @@ class ImportService:
         record: NormalizedInventoryRecord,
         result: SyncImportResult,
         seen_hashes: set[str],
+        seen_business_keys: set[InventoryBusinessKey],
     ) -> int | None:
         """导入单条标准化流水。"""
 
@@ -329,12 +396,12 @@ class ImportService:
             result.add_error(record.source_sheet, record.source_row, None, "试剂名称不能为空")
             return None
         operation_type = normalize_operation_type(record.operation_type or record.operation_text)
-        if operation_type not in {"in", "out"}:
+        if operation_type not in {"in", "out", "adjust"}:
             result.add_error(
                 record.source_sheet,
                 record.source_row,
                 record.reagent_name,
-                "操作类型必须为 in 或 out",
+                "操作类型必须为 in、out 或 adjust",
             )
             return None
         quantity_change = get_signed_quantity(operation_type, record.quantity)
@@ -365,18 +432,25 @@ class ImportService:
 
         reagent = self._find_or_create_reagent(record.reagent_name, result)
         before_quantity = reagent.current_quantity
-        reason = "领料入库" if operation_type == "in" else "实验领用"
+        reason_map = {"in": "领料入库", "out": "实验领用", "adjust": "库存校正"}
+        reason = reason_map[operation_type]
 
-        duplicate_record = find_duplicate_inventory_record(
-            db=self.db,
+        business_key = build_inventory_unique_key(
             reagent_id=reagent.id,
             operation_type=operation_type,
             operator_name=operator_name,
-            quantity_change=quantity_change,
+            quantity=quantity_change,
             operation_time=operation_time,
         )
+        if business_key in seen_business_keys:
+            seen_hashes.add(source_hash)
+            result.skipped += 1
+            return None
+
+        duplicate_record = find_duplicate_inventory_record(self.db, business_key)
         if duplicate_record is not None:
             seen_hashes.add(source_hash)
+            seen_business_keys.add(business_key)
             result.skipped += 1
             return None
 
@@ -403,6 +477,7 @@ class ImportService:
         )
         self.db.add(inventory_record)
         seen_hashes.add(source_hash)
+        seen_business_keys.add(business_key)
         result.created += 1
         return reagent.id
 

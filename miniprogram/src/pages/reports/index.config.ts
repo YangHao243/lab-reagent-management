@@ -1,4 +1,4 @@
 export default definePageConfig({
-  navigationBarTitleText: "仪表盘",
+  navigationBarTitleText: "报表统计",
   enablePullDownRefresh: true,
 });

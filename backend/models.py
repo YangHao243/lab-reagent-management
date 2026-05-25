@@ -170,6 +170,23 @@ class TencentDocsToken(Base):
     )
 
 
+class SystemSetting(Base):
+    """系统级键值配置表，用于保存不适合写回 .env 的运行期元数据。"""
+
+    __tablename__ = "system_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=now_beijing,
+        onupdate=now_beijing,
+    )
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+
+
 class AuditLog(Base):
     """审计日志表，用于记录关键操作。"""
 
@@ -182,3 +199,39 @@ class AuditLog(Base):
     target_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=now_beijing)
+
+
+class TencentDocsSyncJob(Base):
+    """腾讯文档后台同步/导入任务表。
+
+    正式导入/导出通过 Job 模式执行，前端先创建任务再轮询状态，
+    避免长时间阻塞导致 timeout 误判失败。
+    不保存 access_token 等敏感信息。
+    """
+
+    __tablename__ = "tencent_docs_sync_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    job_id: Mapped[str] = mapped_column(String(36), unique=True, index=True, nullable=False)
+    job_type: Mapped[str] = mapped_column(String(30), index=True, nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="single_month")
+    year: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), index=True, nullable=False, default="queued"
+    )
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False, default=now_beijing)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=now_beijing,
+        onupdate=now_beijing,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
